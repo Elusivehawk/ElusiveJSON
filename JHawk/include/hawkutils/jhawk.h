@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <cstdio>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -310,6 +311,13 @@ namespace JHawk
 		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 	}
 
+	//Core API forward declarations
+	JBool* parseJBool(std::string str, uint32_t& start);
+	JValue* parseJIntOrFloat(std::string str, uint32_t& start);
+	JArray* parseJArray(std::string str, uint32_t& start);
+	JObject* parseJObject(std::string str, uint32_t& start);
+	JValue* parseJValue(std::string str, uint32_t& start);
+
 	std::string parseStringValue(std::string str, uint32_t& start)
 	{
 		std::stringstream ret;
@@ -339,7 +347,11 @@ namespace JHawk
 					case 'b': c = '\b'; break;
 					case 'r': c = '\r'; break;
 					case 'f': c = '\f'; break;
-					default: auto err = (std::stringstream() << "Invalud value at " << start << ": \'" << c << '\'').str(); throw std::exception(err.c_str);
+					default: {
+						char buf[256];
+						sprintf_s(buf, 256, "Invalud value at %u: \'%c\'", start, c);
+						throw std::exception(buf);
+					}
 				}
 			}
 
@@ -353,14 +365,14 @@ namespace JHawk
 	std::string parseUnquotedString(std::string str, uint32_t& start)
 	{
 		char c = str[start];
+		std::stringstream ret;
 
 		if (!isASCIILetter(c))
 		{
-			auto err = (std::stringstream() << "Invalud value at " << start << ": \'" << c << '\'').str();
-			throw std::exception(err.c_str);
+			char buf[256];
+			sprintf_s(buf, 256, "Invalud value at %u: \'%c\'", start, c);
+			throw std::exception(buf);
 		}
-
-		std::stringstream ret;
 
 		while (isASCIILetter(c = str[start]))
 		{
@@ -437,8 +449,9 @@ namespace JHawk
 			{
 				if (isHex || isFloat || hasExponent)
 				{
-					auto err = (std::stringstream() << "Invalid char found in int at " << start << ": \'" << c << '\'').str();
-					throw new std::exception(err.c_str);
+					char buf[256];
+					sprintf_s(buf, 256, "Invalud char found in int at %u: \'%c\'", start, c);
+					throw std::exception(buf);
 				}
 
 				isFloat = true;
@@ -456,8 +469,9 @@ namespace JHawk
 
 				if (sign != '-' && sign != '+' && !isInt(c))//Apparently signage is optional
 				{
-					auto err = (std::stringstream() << "Invalid exponent signage in int at " << start << ": \'" << c << '\'').str();
-					throw new std::exception(err.c_str);
+					char buf[256];
+					sprintf_s(buf, 256, "Invalud exponent signage in int at %u: \'%c\'", start, c);
+					throw std::exception(buf);
 				}
 
 				ss << c;
@@ -500,6 +514,7 @@ namespace JHawk
 
 			if (str[start] == ']')
 			{
+				++start;
 				break;
 			}
 
@@ -524,6 +539,12 @@ namespace JHawk
 		{
 			skipWhitespace(str, start);
 
+			if (str[start] == '}')
+			{
+				++start;
+				break;
+			}
+
 			if (str[start] == ',')
 			{
 				throw new std::exception("Erroneous comma found");
@@ -535,9 +556,12 @@ namespace JHawk
 
 			if (str[start] != ':')
 			{
-				auto err = (std::stringstream() << "Invalud value at " << start << ": \'" << str[start] << '\'').str();
-				throw new std::exception(err.c_str);
+				char buf[256];
+				sprintf_s(buf, 256, "Invalud value at %u: \'%c\'", start, str[start]);
+				throw std::exception(buf);
 			}
+
+			++start;
 
 			skipWhitespace(str, start);
 
@@ -548,11 +572,6 @@ namespace JHawk
 			if (str[start] == ',')
 			{
 				++start;
-			}
-
-			if (str[start] == '}')
-			{
-				break;
 			}
 
 		}
@@ -585,13 +604,27 @@ namespace JHawk
 			return parseJIntOrFloat(str, start);
 		}
 
-		switch (startC)
+		if (startC == '{')
 		{
-			case '{': ++start; return parseJObject(str, start);
-			case '[': ++start; return parseJArray(str, start);
-			case 't':
-			case 'f': JBool * bVal = parseJBool(str, start); if (bVal) return bVal;
-			case 'n': if (str.substr(start, 4) == "null") return nullptr;
+			++start;
+			return parseJObject(str, start);
+		}
+
+		if (startC == '[')
+		{
+			++start;
+			return parseJArray(str, start);
+		}
+
+		if (startC == 't' || startC == 'f')
+		{
+			JBool* bVal = parseJBool(str, start);
+			if (bVal) return bVal;
+		}
+
+		if (startC == 'n' && str.substr(start, 4) == "null")
+		{
+			return nullptr;
 		}
 
 		return new JString(parseSomeString(str, start));
