@@ -1,6 +1,10 @@
 ﻿
 //NOTE: Define JHAWK_DISABLE_JSON5 to disable JSON 5 support
 
+#ifndef JHAWK_DISABLE_JSON5
+#define JHAWK_ENABLE_JSON5
+#endif
+
 #pragma once
 
 #include <cstdio>
@@ -256,7 +260,7 @@ namespace JHawk
 	{
 		while (true)
 		{
-#ifndef JHAWK_DISABLE_JSON5
+#ifdef JHAWK_ENABLE_JSON5
 			if (str[index] == '/')
 			{
 				if (str[index + 1] == '/')
@@ -281,7 +285,7 @@ namespace JHawk
 
 			}
 
-#endif // !JHAWK_DISABLE_JSON5
+#endif
 
 			switch (str[index])
 			{
@@ -311,7 +315,7 @@ namespace JHawk
 	{
 		return isInt(c) || c == '-'
 			/*JSON 5 support (lord I regret this)*/ 
-#ifndef JHAWK_DISABLE_JSON5
+#ifdef JHAWK_ENABLE_JSON5
 			|| c == '.' || c == '+'
 #endif
 			;
@@ -343,7 +347,7 @@ namespace JHawk
 				break;
 			}
 
-#ifndef JHAWK_DISABLE_JSON5
+#ifdef JHAWK_ENABLE_JSON5
 			if (c == '\'')
 			{
 				break;
@@ -356,7 +360,7 @@ namespace JHawk
 				switch (str[start]/*now points to the next char*/)
 				{
 					case '\"': c = '\"'; ++start; break;// In both of these cases, it could confuse an escaped quote for an end quote
-#ifndef JHAWK_DISABLE_JSON5
+#ifdef JHAWK_ENABLE_JSON5
 					case '\'': c = '\''; ++start; break;
 					case '\n':
 #endif
@@ -385,7 +389,7 @@ namespace JHawk
 					}
 				}
 			}
-#ifndef JHAWK_DISABLE_JSON5
+#ifdef JHAWK_DISABLE_JSON5
 			if (c == '\n')
 			{
 				throw std::exception("Newlines not allowed in strings");
@@ -426,7 +430,7 @@ namespace JHawk
 		char startC = str[start];
 
 		if (startC == '\"'
-#ifndef JHAWK_DISABLE_JSON5
+#ifdef JHAWK_ENABLE_JSON5
 			|| startC == '\''
 #endif
 		)
@@ -441,7 +445,7 @@ namespace JHawk
 		throw std::exception(buf);
 #else
 		return parseUnquotedString(str, start);
-#endif // !JHAWK_DISABLE_JSON5
+#endif
 	}
 
 	JBool* parseJBool(std::string str, uint32_t& start)
@@ -468,7 +472,7 @@ namespace JHawk
 		bool hasExponent = false;
 		int consumed = 0;//For sanity checking against non-JSON 5 ints
 
-#ifndef JHAWK_DISABLE_JSON5
+#ifdef JHAWK_ENABLE_JSON5
 		if (str[start] == '∞')
 		{
 			return new JFloat(std::numeric_limits<float>::infinity());
