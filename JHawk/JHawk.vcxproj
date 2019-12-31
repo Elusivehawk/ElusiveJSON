@@ -126,6 +126,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="include\hawkutils\jhawk.h" />
+    <ClInclude Include="json.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\examples.cpp" />
