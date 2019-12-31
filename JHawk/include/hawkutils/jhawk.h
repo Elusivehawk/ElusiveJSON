@@ -1,7 +1,10 @@
+﻿
+//NOTE: Define JHAWK_DISABLE_JSON5 to disable JSON 5 support
 
 #pragma once
 
 #include <cstdio>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -253,6 +256,7 @@ namespace JHawk
 	{
 		while (true)
 		{
+#ifndef JHAWK_DISABLE_JSON5
 			if (str[index] == '/')
 			{
 				if (str[index + 1] == '/')
@@ -276,6 +280,8 @@ namespace JHawk
 				}
 
 			}
+
+#endif // !JHAWK_DISABLE_JSON5
 
 			switch (str[index])
 			{
@@ -303,7 +309,12 @@ namespace JHawk
 
 	bool isIntStart(char c)
 	{
-		return isInt(c) || c == '-' || /*JSON 5 support (lord I regret this)*/ c == '.' || c == '+';
+		return isInt(c) || c == '-'
+			/*JSON 5 support (lord I regret this)*/ 
+#ifndef JHAWK_DISABLE_JSON5
+			|| c == '.' || c == '+'
+#endif
+			;
 	}
 
 	bool isASCIILetter(char c)
@@ -327,20 +338,40 @@ namespace JHawk
 			char c = str[start];
 			++start;
 
-			if (c == '\'' || c == '\"')
+			if (c == '\"')
 			{
 				break;
 			}
+
+#ifndef JHAWK_DISABLE_JSON5
+			if (c == '\'')
+			{
+				break;
+			}
+
+#endif
 
 			if (c == '\\')
 			{
 				switch (str[start]/*now points to the next char*/)
 				{
 					case '\"': c = '\"'; ++start; break;// In both of these cases, it could confuse an escaped quote for an end quote
+#ifndef JHAWK_DISABLE_JSON5
 					case '\'': c = '\''; ++start; break;
 					case '\n':
+#endif
 					case 'n': c = '\n'; break;
-					case 'u': break;//Technically the JSON standard only allows for \uFFFF or something like that, but I'm far too lazy for that, ngl.
+					case 'u': {
+						for (int i = 1; i <= 4; ++i)
+						{
+							if (!isHexInt(str[start + i]))
+							{
+								char buf[256];
+								sprintf_s(buf, 256, "Malformed UTF-8 string literal at %u", start);
+								throw std::exception(buf);
+							}
+						}
+					} break;
 					case 't': c = '\t'; break;
 					case '/': c = '/'; break;
 					case '\\': c = '\\'; break;
@@ -354,6 +385,12 @@ namespace JHawk
 					}
 				}
 			}
+#ifndef JHAWK_DISABLE_JSON5
+			if (c == '\n')
+			{
+				throw std::exception("Newlines not allowed in strings");
+			}
+#endif
 
 			ret << c;
 
@@ -388,13 +425,23 @@ namespace JHawk
 	{
 		char startC = str[start];
 
-		if (startC == '\"' || startC == '\'')
+		if (startC == '\"'
+#ifndef JHAWK_DISABLE_JSON5
+			|| startC == '\''
+#endif
+		)
 		{
 			++start;
 			return parseStringValue(str, start);
 		}
 
+#ifdef JHAWK_DISABLE_JSON5
+		char buf[256];
+		sprintf_s(buf, 256, "Invalud string literal at %u", start);
+		throw std::exception(buf);
+#else
 		return parseUnquotedString(str, start);
+#endif // !JHAWK_DISABLE_JSON5
 	}
 
 	JBool* parseJBool(std::string str, uint32_t& start)
@@ -419,6 +466,23 @@ namespace JHawk
 		bool isHex = false;
 		bool isFloat = false;
 		bool hasExponent = false;
+		int consumed = 0;//For sanity checking against non-JSON 5 ints
+
+#ifndef JHAWK_DISABLE_JSON5
+		if (str[start] == '∞')
+		{
+			return new JFloat(std::numeric_limits<float>::infinity());
+		}
+
+		if (str[start] == '-' && str[start + 1] == '∞')
+		{
+			return new JFloat(std::numeric_limits<float>::infinity() * -1.0f);
+		}
+
+		if (str.substr(start, 3) == "NaN")
+		{
+			return new JFloat(NAN);
+		}
 
 		if (str[start] == '0' && str[start + 1] == 'x')
 		{
@@ -426,23 +490,20 @@ namespace JHawk
 			ss << std::hex;
 			ss << str[start] << str[start + 1];
 			start += 2;
+			consumed += 2;
 
 		}
-		else
-		{
-			ss << str[start];
-			++start;
-
-		}
-
+#endif
+		
 		while (true)
 		{
 			char c = str[start];
-			++start;
 
-			if (isInt(c) || (isHex && isHexInt(c)))
+			if (isInt(c) || (isHex && isHexInt(c)) /*Doesn't need to be checked against JHAWK_DISABLE_JSON5 because of the isHex flag*/)
 			{
 				ss << c;
+				++start;
+				++consumed;
 				continue;
 			}
 			else if (c == '.')
@@ -454,9 +515,19 @@ namespace JHawk
 					throw std::exception(buf);
 				}
 
+#ifdef JHAWK_DISABLE_JSON5
+				if (consumed == 0 || !isInt(str[start + 1]))
+				{
+					char buf[256];
+					sprintf_s(buf, 256, "Invalud char found in int at %u: \'%c\'", start, c);
+					throw std::exception(buf);
+				}
+#endif
+
 				isFloat = true;
 				ss << c;
 				++start;
+				++consumed;
 				continue;
 			}
 			else if (c == 'e' || c == 'E')
@@ -464,6 +535,7 @@ namespace JHawk
 				hasExponent = true;
 				ss << c;
 				++start;
+				++consumed;
 
 				char sign = str[start];
 
@@ -476,9 +548,11 @@ namespace JHawk
 
 				ss << c;
 				++start;
+				++consumed;
 				continue;
 			}
-
+			
+			//Don't need to have any consequences for an invalid int (i.e. 400j) because after this, it will probably check for a comma. It won't find the comma, and complain.
 			break;
 		}
 
@@ -498,9 +572,27 @@ namespace JHawk
 	JArray* parseJArray(std::string str, uint32_t& start)
 	{
 		std::vector<JValue*> vals;
+		bool expectNextObj = false;
 
 		while (true)
 		{
+			if (str[start] == ']')
+			{
+#ifdef JHAWK_DISABLE_JSON5
+				if (expectNextObj)
+				{
+					char buf[256];
+					sprintf_s(buf, 256, "Trailing comma found at %u'", start);
+					throw std::exception(buf);
+				}
+#endif
+
+				++start;
+				break;
+			}
+
+			expectNextObj = false;
+
 			skipWhitespace(str, start);
 
 			JValue* val = parseJValue(str, start);
@@ -509,13 +601,8 @@ namespace JHawk
 
 			if (str[start] == ',')
 			{
+				expectNextObj = true;
 				++start;
-			}
-
-			if (str[start] == ']')
-			{
-				++start;
-				break;
 			}
 
 		}
@@ -534,6 +621,7 @@ namespace JHawk
 	JObject* parseJObject(std::string str, uint32_t& start)
 	{
 		JObject* ret = new JObject();
+		bool expectNextObj = false;
 
 		while (true)
 		{
@@ -541,14 +629,27 @@ namespace JHawk
 
 			if (str[start] == '}')
 			{
+#ifdef JHAWK_DISABLE_JSON5
+				if (expectNextObj)
+				{
+					char buf[256];
+					sprintf_s(buf, 256, "Trailing comma found at %u'", start);
+					throw std::exception(buf);
+				}
+#endif
+
 				++start;
 				break;
 			}
 
 			if (str[start] == ',')
 			{
-				throw new std::exception("Erroneous comma found");
+				char buf[256];
+				sprintf_s(buf, 256, "Erroneous comma found %u'", start);
+				throw std::exception(buf);
 			}
+
+			expectNextObj = false;
 
 			std::string key = parseSomeString(str, start);
 
@@ -571,6 +672,7 @@ namespace JHawk
 
 			if (str[start] == ',')
 			{
+				expectNextObj = true;
 				++start;
 			}
 
