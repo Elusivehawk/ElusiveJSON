@@ -23,6 +23,7 @@
     <ProjectGuid>{051092CC-FDFE-4014-80D9-432EB0EE9CBC}</ProjectGuid>
     <RootNamespace>JHawk</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>ElusiveJSON</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -125,11 +126,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="include\hawkutils\jhawk.h" />
-    <ClInclude Include="json.h" />
+    <ClInclude Include="include\hawkutils\elusivejson.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\examples.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="example.json" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

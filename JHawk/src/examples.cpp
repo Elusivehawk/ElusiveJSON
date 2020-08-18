@@ -2,7 +2,9 @@
 #include <fstream>
 #include <iostream>
 
-#include "hawkutils/jhawk.h"
+#include "hawkutils/elusivejson.h"
+
+using namespace ElusiveJSON;
 
 int main()
 {
@@ -24,8 +26,8 @@ int main()
 
 	jsonData = std::string(rawData);
 
-	JHawk::JObject* jobj = JHawk::parseJObject(jsonData);
+	JObject* jobj = parseJObject(jsonData);
 
-	std::cout << jobj->toString() << std::endl;
+	std::cout << jobj->toString(true) << std::endl;
 
 }

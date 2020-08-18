@@ -1,15 +1,15 @@
 ﻿
-//NOTE: Define JHAWK_DISABLE_JSON5 to disable JSON 5 support
+//NOTE: Define ELUSIVEJSON_DISABLE_JSON5 to disable JSON 5 support
 
-#ifndef JHAWK_DISABLE_JSON5
-#define JHAWK_ENABLE_JSON5
+#ifndef ELUSIVEJSON_DISABLE_JSON5
+#define ELUSIVEJSON_ENABLE_JSON5
 #endif
 
 #pragma once
 
 #include <cstdio>
 #include <limits>
-#include <map>
+#include <unordered_map>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -17,7 +17,7 @@
 
 #define NOT_IMPL_YET {throw new function_not_impl();}
 
-namespace JHawk
+namespace ElusiveJSON
 {
 	class function_not_impl : public std::logic_error
 	{
@@ -37,8 +37,7 @@ namespace JHawk
 		virtual size_t length() NOT_IMPL_YET;
 		virtual JValue* getValue(uint32_t index) NOT_IMPL_YET;
 		virtual void setValue(uint32_t index, JValue* value) NOT_IMPL_YET;
-
-		virtual std::string toString() NOT_IMPL_YET;
+		virtual std::string toString(bool pretty = false, int scope = 0) NOT_IMPL_YET;
 
 	};
 
@@ -54,7 +53,7 @@ namespace JHawk
 			return value;
 		}
 
-		std::string toString()
+		std::string toString(bool pretty = false, int scope = 0)
 		{
 			std::stringstream ss;
 
@@ -77,7 +76,7 @@ namespace JHawk
 			return value;
 		}
 
-		std::string toString()
+		std::string toString(bool pretty = false, int scope = 0)
 		{
 			std::stringstream ss;
 
@@ -100,7 +99,7 @@ namespace JHawk
 			return value;
 		}
 
-		std::string toString()
+		std::string toString(bool pretty = false, int scope = 0)
 		{
 			std::stringstream ss;
 
@@ -123,7 +122,7 @@ namespace JHawk
 			return value;
 		}
 
-		std::string toString()
+		std::string toString(bool pretty = false, int scope = 0)
 		{
 			std::stringstream ss;
 			
@@ -139,7 +138,7 @@ namespace JHawk
 	class JObject : public JValue
 	{
 	private:
-		std::map<std::string, JValue*> values = {};
+		std::unordered_map<std::string, JValue*> values = {};
 	public:
 		JObject() {}
 
@@ -153,11 +152,23 @@ namespace JHawk
 			values.insert_or_assign(name, value);
 		}
 
-		std::string toString()
+		std::string toString(bool pretty = false, int scope = 0)
 		{
 			std::stringstream ss;
 
 			ss << '{';
+
+			if (pretty)
+			{
+				ss << '\n';
+
+				for (int s = 0; s < scope; ++s)
+				{
+					ss << '\t';
+
+				}
+
+			}
 
 			int i = 0;
 
@@ -166,6 +177,19 @@ namespace JHawk
 				if (i > 0)
 				{
 					ss << ',';
+
+					if (pretty)
+					{
+						ss << '\n';
+
+						for (int s = 0; s < scope; ++s)
+						{
+							ss << '\t';
+
+						}
+
+					}
+
 				}
 
 				ss << '\"';
@@ -174,7 +198,7 @@ namespace JHawk
 
 				if (pair.second)
 				{
-					ss << pair.second->toString();
+					ss << pair.second->toString(pretty, scope + 1);
 
 				}
 				else
@@ -187,7 +211,19 @@ namespace JHawk
 
 			}
 
-			ss << '}';
+			if (pretty)
+			{
+				ss << '\n';
+
+				for (int s = 0; s < scope; ++s)
+				{
+					ss << '\t';
+
+				}
+
+			}
+
+			ss << "}";
 
 			return ss.str();
 		}
@@ -221,7 +257,7 @@ namespace JHawk
 			values[index] = value;
 		}
 
-		std::string toString()
+		std::string toString(bool pretty = false, int scope = 0)
 		{
 			std::stringstream ss;
 
@@ -260,7 +296,7 @@ namespace JHawk
 	{
 		while (true)
 		{
-#ifdef JHAWK_ENABLE_JSON5
+#ifdef ELUSIVEJSON_ENABLE_JSON5
 			if (str[index] == '/')
 			{
 				if (str[index + 1] == '/')
@@ -315,7 +351,7 @@ namespace JHawk
 	{
 		return isInt(c) || c == '-'
 			/*JSON 5 support (lord I regret this)*/ 
-#ifdef JHAWK_ENABLE_JSON5
+#ifdef ELUSIVEJSON_ENABLE_JSON5
 			|| c == '.' || c == '+'
 #endif
 			;
@@ -347,7 +383,7 @@ namespace JHawk
 				break;
 			}
 
-#ifdef JHAWK_ENABLE_JSON5
+#ifdef ELUSIVEJSON_ENABLE_JSON5
 			if (c == '\'')
 			{
 				break;
@@ -360,7 +396,7 @@ namespace JHawk
 				switch (str[start]/*now points to the next char*/)
 				{
 					case '\"': c = '\"'; ++start; break;// In both of these cases, it could confuse an escaped quote for an end quote
-#ifdef JHAWK_ENABLE_JSON5
+#ifdef ELUSIVEJSON_ENABLE_JSON5
 					case '\'': c = '\''; ++start; break;
 					case '\n':
 #endif
@@ -389,7 +425,7 @@ namespace JHawk
 					}
 				}
 			}
-#ifdef JHAWK_DISABLE_JSON5
+#ifdef	ELUSIVEJSON_DISABLE_JSON5
 			if (c == '\n')
 			{
 				throw std::exception("Newlines not allowed in strings");
@@ -430,7 +466,7 @@ namespace JHawk
 		char startC = str[start];
 
 		if (startC == '\"'
-#ifdef JHAWK_ENABLE_JSON5
+#ifdef ELUSIVEJSON_ENABLE_JSON5
 			|| startC == '\''
 #endif
 		)
@@ -439,7 +475,7 @@ namespace JHawk
 			return parseStringValue(str, start);
 		}
 
-#ifdef JHAWK_DISABLE_JSON5
+#ifdef ELUSIVEJSON_DISABLE_JSON5
 		char buf[256];
 		sprintf_s(buf, 256, "Invalud string literal at %u", start);
 		throw std::exception(buf);
@@ -472,7 +508,7 @@ namespace JHawk
 		bool hasExponent = false;
 		int consumed = 0;//For sanity checking against non-JSON 5 ints
 
-#ifdef JHAWK_ENABLE_JSON5
+#ifdef ELUSIVEJSON_ENABLE_JSON5
 		if (str[start] == '∞')
 		{
 			return new JFloat(std::numeric_limits<float>::infinity());
@@ -503,7 +539,7 @@ namespace JHawk
 		{
 			char c = str[start];
 
-			if (isInt(c) || (isHex && isHexInt(c)) /*Doesn't need to be checked against JHAWK_DISABLE_JSON5 because of the isHex flag*/)
+			if (isInt(c) || (isHex && isHexInt(c)) /*Doesn't need to be checked against ELUSIVEJSON_DISABLE_JSON5 because of the isHex flag*/)
 			{
 				ss << c;
 				++start;
@@ -519,7 +555,7 @@ namespace JHawk
 					throw std::exception(buf);
 				}
 
-#ifdef JHAWK_DISABLE_JSON5
+#ifdef ELUSIVEJSON_DISABLE_JSON5
 				if (consumed == 0 || !isInt(str[start + 1]))
 				{
 					char buf[256];
@@ -582,7 +618,7 @@ namespace JHawk
 		{
 			if (str[start] == ']')
 			{
-#ifdef JHAWK_DISABLE_JSON5
+#ifdef ELUSIVEJSON_DISABLE_JSON5
 				if (expectNextObj)
 				{
 					char buf[256];
@@ -633,7 +669,7 @@ namespace JHawk
 
 			if (str[start] == '}')
 			{
-#ifdef JHAWK_DISABLE_JSON5
+#ifdef ELUSIVEJSON_DISABLE_JSON5
 				if (expectNextObj)
 				{
 					char buf[256];
