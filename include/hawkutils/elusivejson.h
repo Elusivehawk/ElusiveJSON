@@ -287,13 +287,18 @@ namespace ElusiveJSON
 	class JMalloc
 	{
 	private:
-		const char* data;
+		char* data;
 		const size_t length;
 		size_t current = 0;
 		JMalloc* next = nullptr;
 
 	public:
 		JMalloc(size_t expected) : length(expected), data(new char[expected]) {}
+
+		JMalloc(JMalloc* old) : JMalloc(old->totalMemory())
+		{
+			old->copy(data, 0);
+		}
 
 		~JMalloc()
 		{
