@@ -551,7 +551,7 @@ namespace ElusiveJSON
 
 	std::string parseStringValue(std::string str, uint32_t& start, JMalloc*& malloc, char delim)
 	{
-		std::stringstream ret;
+		std::stringstream ss;
 
 		while (true)
 		{
@@ -604,17 +604,17 @@ namespace ElusiveJSON
 			}
 #endif
 
-			ret << c;
+			ss << c;
 
 		}
 
-		return ret.str();
+		return ss.str();
 	}
 
 	std::string parseUnquotedString(std::string str, uint32_t& start, JMalloc*& malloc)
 	{
 		char c = str[start];
-		std::stringstream ret;
+		std::stringstream ss;
 
 		if (!isASCIILetter(c))
 		{
@@ -625,12 +625,12 @@ namespace ElusiveJSON
 
 		while (isASCIILetter(c = str[start]))
 		{
-			ret << c;
+			ss << c;
 			++start;
 
 		}
 
-		return ret.str();
+		return ss.str();
 	}
 
 	std::string parseSomeString(std::string str, uint32_t& start, JMalloc*& malloc)
@@ -821,12 +821,12 @@ namespace ElusiveJSON
 			return nullptr;
 		}
 
-		auto string = parseSomeString(str, start, malloc);
+		std::string parsedStr = parseSomeString(str, start, malloc);
 
-		char* strMem = (char*)malloc->allocate(string.length());
-		std::memcpy(strMem, str.c_str(), string.length());
+		char* strMem = (char*)malloc->allocate(parsedStr.length());
+		std::memcpy(strMem, parsedStr.c_str(), parsedStr.length());
 
-		return malloc->allocString(strMem, string.length());
+		return malloc->allocString(strMem, parsedStr.length());
 	}
 
 	JValue* parseJValue(std::string str, JMalloc*& malloc)
