@@ -295,6 +295,8 @@ namespace ElusiveJSON
 	public:
 		JMalloc(size_t expected) : length(expected), data(new char[expected]) {}
 
+		JMalloc() : JMalloc(4096) {}
+
 		JMalloc(JMalloc* old) : JMalloc(old->totalMemory())
 		{
 			old->copy(data, 0);
