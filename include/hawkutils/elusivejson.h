@@ -297,7 +297,7 @@ namespace ElusiveJSON
 
 		JMalloc() : JMalloc(4096) {}
 
-		JMalloc(JMalloc* old) : JMalloc(old->totalMemory())
+		JMalloc(JMalloc* old) : JMalloc(old->memTotal())
 		{
 			old->copy(data, 0);
 		}
@@ -308,9 +308,14 @@ namespace ElusiveJSON
 			delete next;
 		}
 
-		size_t totalMemory()
+		size_t memTotal()
 		{
-			return length + (next ? next->totalMemory() : 0);
+			return length + (next ? next->memTotal() : 0);
+		}
+
+		size_t memUsed()
+		{
+			return current;
 		}
 
 		void copy(char* to, size_t offset)
@@ -346,6 +351,17 @@ namespace ElusiveJSON
 			current = nextMem;
 
 			return mem;
+		}
+
+		void clear(bool secure = true)
+		{
+			if (secure)
+			{
+				std::memset(data, 0, memUsed());
+			}
+
+			current = 0;
+
 		}
 
 		JBool* allocBool(bool v) { return new(allocate(1)) JBool(v); }
