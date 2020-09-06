@@ -323,13 +323,18 @@ namespace ElusiveJSON
 
 		void* allocate(size_t alloc, size_t align = 1)
 		{
-			auto nextMem = (((current + align - 1) / align) * align) + alloc;
+			if (!alloc || !align)
+			{
+				return nullptr;
+			}
+
+			auto nextMem = ((current + align - 1) / align * align) + alloc;
 
 			if (nextMem > length)
 			{
 				if (!next)
 				{
-					next = new JMalloc(length);
+					next = new JMalloc((alloc + length - 1) / length * length);
 				}
 
 				return next->allocate(alloc, align);
