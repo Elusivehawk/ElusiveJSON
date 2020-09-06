@@ -15,15 +15,15 @@
 #include <string>
 #include <vector>
 
-#define NOT_IMPL_YET {throw new function_not_impl();}
-
 namespace ElusiveJSON
 {
-	class function_not_impl : public std::logic_error
+	class NoImplError : public std::logic_error
 	{
 	public:
-		function_not_impl() : std::logic_error("Method or function not yet implemented") {}
+		NoImplError() : std::logic_error("Method or function not yet implemented") {}
 	};
+
+#define NOT_IMPL_YET {throw new NoImplError();}
 
 	class JValue
 	{
@@ -113,13 +113,14 @@ namespace ElusiveJSON
 	class JString : public JValue
 	{
 	private:
-		std::string value;
+		const char* string;
+		const size_t length;
 	public:
-		JString(std::string str) : value(str) {}
+		JString(const char* str, size_t len) : string(str), length(len){}
 
 		std::string strValue()
 		{
-			return value;
+			return std::string(string, length);
 		}
 
 		std::string toString(bool pretty = false, int scope = 0)
@@ -127,7 +128,7 @@ namespace ElusiveJSON
 			std::stringstream ss;
 			
 			ss << '\"';
-			ss << value;
+			ss << strValue();
 			ss << '\"';
 
 			return ss.str();
@@ -140,7 +141,7 @@ namespace ElusiveJSON
 	private:
 		std::unordered_map<std::string, JValue*> values = {};
 	public:
-		JObject() {}
+		JObject(){}
 
 		JValue* getValue(std::string name)
 		{
@@ -236,16 +237,7 @@ namespace ElusiveJSON
 		JValue** values;
 		size_t length;
 	public:
-		JArray(size_t len) : length(len)
-		{
-			values = new JValue * [len];
-
-		}
-
-		~JArray()
-		{
-			delete[] values;
-		}
+		JArray(JValue** vs, size_t len) : values(vs), length(len){}
 
 		JValue* getValue(uint32_t index)
 		{
@@ -289,6 +281,67 @@ namespace ElusiveJSON
 
 			return ss.str();
 		}
+
+	};
+
+	class JMalloc
+	{
+	private:
+		const char* data;
+		const size_t length;
+		size_t current = 0;
+		JMalloc* next = nullptr;
+
+	public:
+		JMalloc(size_t expected) : length(expected), data(new char[expected]) {}
+
+		~JMalloc()
+		{
+			delete[] data;
+			delete next;
+		}
+
+		size_t totalMemory()
+		{
+			return length + (next ? next->totalMemory() : 0);
+		}
+
+		void copy(char* to, size_t offset)
+		{
+			std::memcpy(to + offset, data, length);
+
+			if (next)
+			{
+				next->copy(to, offset + length);
+			}
+		}
+
+		void* allocate(size_t alloc, size_t align = 1)
+		{
+			auto nextMem = (((current + align - 1) / align) * align) + alloc;
+
+			if (nextMem > length)
+			{
+				if (!next)
+				{
+					next = new JMalloc(length);
+				}
+
+				return next->allocate(alloc, align);
+			}
+
+			void* mem = (void*)(&data[nextMem - alloc]);
+			current = nextMem;
+
+			return mem;
+		}
+
+		JBool* allocBool(bool v) { return new(allocate(1)) JBool(v); }
+		JInt* allocInt(int v) { return new(allocate(4, 4)) JInt(v); }
+		JFloat* allocFloat(float v) { return new(allocate(4, 4)) JFloat(v); }
+		JString* allocString(const char* str, size_t length) { return new(allocate(sizeof(JString), 8)) JString(str, length); }
+		JArray* allocArray(JValue** arr, size_t length) { return new(allocate(sizeof(JArray), 8)) JArray(arr, length); }
+		JObject* allocObject() { return new(allocate(sizeof(JObject), 8)) JObject(); }
 
 	};
 
@@ -363,144 +416,26 @@ namespace ElusiveJSON
 	}
 
 	//Core API forward declarations
-	JBool* parseJBool(std::string str, uint32_t& start);
-	JValue* parseJIntOrFloat(std::string str, uint32_t& start);
-	JArray* parseJArray(std::string str, uint32_t& start);
-	JObject* parseJObject(std::string str, uint32_t& start);
-	JValue* parseJValue(std::string str, uint32_t& start);
 
-	std::string parseStringValue(std::string str, uint32_t& start)
-	{
-		std::stringstream ret;
+	JValue* parseJValue(std::string str, uint32_t& start, JMalloc*& malloc);
 
-		while (true)
-		{
-			char c = str[start];
-			++start;
-
-			if (c == '\"')
-			{
-				break;
-			}
-
-#ifdef ELUSIVEJSON_ENABLE_JSON5
-			if (c == '\'')
-			{
-				break;
-			}
-
-#endif
-
-			if (c == '\\')
-			{
-				switch (str[start]/*now points to the next char*/)
-				{
-					case '\"': c = '\"'; ++start; break;// In both of these cases, it could confuse an escaped quote for an end quote
-#ifdef ELUSIVEJSON_ENABLE_JSON5
-					case '\'': c = '\''; ++start; break;
-					case '\n':
-#endif
-					case 'n': c = '\n'; break;
-					case 'u': {
-						for (int i = 1; i <= 4; ++i)
-						{
-							if (!isHexInt(str[start + i]))
-							{
-								char buf[256];
-								sprintf_s(buf, 256, "Malformed UTF-8 string literal at %u", start);
-								throw std::exception(buf);
-							}
-						}
-					} break;
-					case 't': c = '\t'; break;
-					case '/': c = '/'; break;
-					case '\\': c = '\\'; break;
-					case 'b': c = '\b'; break;
-					case 'r': c = '\r'; break;
-					case 'f': c = '\f'; break;
-					default: {
-						char buf[256];
-						sprintf_s(buf, 256, "Invalud value at %u: \'%c\'", start, c);
-						throw std::exception(buf);
-					}
-				}
-			}
-#ifdef	ELUSIVEJSON_DISABLE_JSON5
-			if (c == '\n')
-			{
-				throw std::exception("Newlines not allowed in strings");
-			}
-#endif
-
-			ret << c;
-
-		}
-
-		return ret.str();
-	}
-
-	std::string parseUnquotedString(std::string str, uint32_t& start)
-	{
-		char c = str[start];
-		std::stringstream ret;
-
-		if (!isASCIILetter(c))
-		{
-			char buf[256];
-			sprintf_s(buf, 256, "Invalud value at %u: \'%c\'", start, c);
-			throw std::exception(buf);
-		}
-
-		while (isASCIILetter(c = str[start]))
-		{
-			ret << c;
-			++start;
-
-		}
-
-		return ret.str();
-	}
-
-	std::string parseSomeString(std::string str, uint32_t& start)
-	{
-		char startC = str[start];
-
-		if (startC == '\"'
-#ifdef ELUSIVEJSON_ENABLE_JSON5
-			|| startC == '\''
-#endif
-		)
-		{
-			++start;
-			return parseStringValue(str, start);
-		}
-
-#ifdef ELUSIVEJSON_DISABLE_JSON5
-		char buf[256];
-		sprintf_s(buf, 256, "Invalud string literal at %u", start);
-		throw std::exception(buf);
-#else
-		return parseUnquotedString(str, start);
-#endif
-	}
-
-	JBool* parseJBool(std::string str, uint32_t& start)
+	JBool* parseJBool(std::string str, uint32_t& start, JMalloc*& malloc)
 	{
 		if (str.substr(start, 4) == "true")
 		{
 			start += 4;
-			return new JBool(true);
+			return malloc->allocBool(true);
 		}
 		else if (str.substr(start, 5) == "false")
 		{
 			start += 5;
-			return new JBool(false);
+			return malloc->allocBool(false);
 		}
 
 		return nullptr;
 	}
 
-	JValue* parseJIntOrFloat(std::string str, uint32_t& start)
+	JValue* parseJIntOrFloat(std::string str, uint32_t& start, JMalloc*& malloc)
 	{
 		std::stringstream ss;
 		bool isHex = false;
@@ -511,17 +446,17 @@ namespace ElusiveJSON
 #ifdef ELUSIVEJSON_ENABLE_JSON5
 		if (str[start] == '∞')
 		{
-			return new JFloat(std::numeric_limits<float>::infinity());
+			return malloc->allocFloat(std::numeric_limits<float>::infinity());
 		}
 
 		if (str[start] == '-' && str[start + 1] == '∞')
 		{
-			return new JFloat(std::numeric_limits<float>::infinity() * -1.0f);
+			return malloc->allocFloat(std::numeric_limits<float>::infinity() * -1.0f);
 		}
 
 		if (str.substr(start, 3) == "NaN")
 		{
-			return new JFloat(NAN);
+			return malloc->allocFloat(NAN);
 		}
 
 		if (str[start] == '0' && str[start + 1] == 'x')
@@ -534,7 +469,7 @@ namespace ElusiveJSON
 
 		}
 #endif
-		
+
 		while (true)
 		{
 			char c = str[start];
@@ -591,7 +526,7 @@ namespace ElusiveJSON
 				++consumed;
 				continue;
 			}
-			
+
 			//Don't need to have any consequences for an invalid int (i.e. 400j) because after this, it will probably check for a comma. It won't find the comma, and complain.
 			break;
 		}
@@ -600,16 +535,123 @@ namespace ElusiveJSON
 		{
 			float f;
 			ss >> f;
-			return new JFloat(f);
+			return malloc->allocFloat(f);
 		}
 
 		int i;
 		ss >> i;
 
-		return new JInt(i);
+		return malloc->allocInt(i);
 	}
 
-	JArray* parseJArray(std::string str, uint32_t& start)
+	std::string parseStringValue(std::string str, uint32_t& start, JMalloc*& malloc, char delim)
+	{
+		std::stringstream ret;
+
+		while (true)
+		{
+			char c = str[start];
+			++start;
+
+			if (c == delim)
+			{
+				break;
+			}
+
+			if (c == '\\')
+			{
+				switch (str[start]/*now points to the next char*/)
+				{
+					case '\"': c = '\"'; ++start; break;// In both of these cases, it could confuse an escaped quote for an end quote
+#ifdef ELUSIVEJSON_ENABLE_JSON5
+					case '\'': c = '\''; ++start; break;
+					case '\n':
+#endif
+					case 'n': c = '\n'; break;
+					case 'u': {
+						for (int i = 1; i <= 4; ++i)
+						{
+							if (!isHexInt(str[start + i]))
+							{
+								char buf[256];
+								sprintf_s(buf, 256, "Malformed UTF-8 string literal at %u", start);
+								throw std::exception(buf);
+							}
+						}
+					} break;
+					case 't': c = '\t'; break;
+					case '/': c = '/'; break;
+					case '\\': c = '\\'; break;
+					case 'b': c = '\b'; break;
+					case 'r': c = '\r'; break;
+					case 'f': c = '\f'; break;
+					default: {
+						char buf[256];
+						sprintf_s(buf, 256, "Invalud value at %u: \'%c\'", start, c);
+						throw std::exception(buf);
+					}
+				}
+			}
+#ifdef ELUSIVEJSON_DISABLE_JSON5
+			if (c == '\n')
+			{
+				throw std::exception("Newlines not allowed in strings");
+			}
+#endif
+
+			ret << c;
+
+		}
+
+		return ret.str();
+	}
+
+	std::string parseUnquotedString(std::string str, uint32_t& start, JMalloc*& malloc)
+	{
+		char c = str[start];
+		std::stringstream ret;
+
+		if (!isASCIILetter(c))
+		{
+			char buf[256];
+			sprintf_s(buf, 256, "Invalud value at %u: \'%c\'", start, c);
+			throw std::exception(buf);
+		}
+
+		while (isASCIILetter(c = str[start]))
+		{
+			ret << c;
+			++start;
+
+		}
+
+		return ret.str();
+	}
+
+	std::string parseSomeString(std::string str, uint32_t& start, JMalloc*& malloc)
+	{
+		char startC = str[start];
+
+		if (startC == '\"'
+#ifdef ELUSIVEJSON_ENABLE_JSON5
+			|| startC == '\''
+#endif
+		)
+		{
+			++start;
+			return parseStringValue(str, start, malloc, startC);
+		}
+
+#ifdef ELUSIVEJSON_DISABLE_JSON5
+		char buf[256];
+		sprintf_s(buf, 256, "Invalud string literal at %u", start);
+		throw std::exception(buf);
+#else
+		return parseUnquotedString(str, start, malloc);
+#endif
+	}
+
+	JArray* parseJArray(std::string str, uint32_t& start, JMalloc*& malloc)
 	{
 		std::vector<JValue*> vals;
 		bool expectNextObj = false;
@@ -635,7 +677,7 @@ namespace ElusiveJSON
 
 			skipWhitespace(str, start);
 
-			JValue* val = parseJValue(str, start);
+			JValue* val = parseJValue(str, start, malloc);
 
 			vals.push_back(val);
 
@@ -647,20 +689,20 @@ namespace ElusiveJSON
 
 		}
 
-		JArray* ret = new JArray(vals.size());
-
-		for (size_t i = 0; i < vals.size(); ++i)
+		JValue** array = (JValue**)malloc->allocate(vals.size() * sizeof(void*), sizeof(void*));
+		
+		for (uint32_t i = 0; i < vals.size(); ++i)
 		{
-			ret->setValue(i, vals.at(i));
+			array[i] = vals.at(i);
 
 		}
 
-		return ret;
+		return malloc->allocArray(array, vals.size());
 	}
 
-	JObject* parseJObject(std::string str, uint32_t& start)
+	JObject* parseJObject(std::string str, uint32_t& start, JMalloc*& malloc)
 	{
-		JObject* ret = new JObject();
+		JObject* ret = malloc->allocObject();
 		bool expectNextObj = false;
 
 		while (true)
@@ -691,7 +733,7 @@ namespace ElusiveJSON
 
 			expectNextObj = false;
 
-			std::string key = parseSomeString(str, start);
+			std::string key = parseSomeString(str, start, malloc);
 
 			skipWhitespace(str, start);
 
@@ -706,7 +748,7 @@ namespace ElusiveJSON
 
 			skipWhitespace(str, start);
 
-			JValue* val = parseJValue(str, start);
+			JValue* val = parseJValue(str, start, malloc);
 
 			ret->setValue(key, val);
 
@@ -721,7 +763,7 @@ namespace ElusiveJSON
 		return ret;
 	}
 
-	JObject* parseJObject(std::string str)
+	JObject* parseJObject(std::string str, JMalloc*& malloc)
 	{
 		uint32_t start = 0;
 
@@ -729,38 +771,43 @@ namespace ElusiveJSON
 
 		if (str[start] != '{')
 		{
-			throw std::exception("Invalud JSON");
+			throw std::exception("Invalud JSON object");
 		}
 
 		++start;
 
-		return parseJObject(str, start);
+		if (malloc == nullptr)
+		{
+			malloc = new JMalloc(str.length());
+		}
+
+		return parseJObject(str, start, malloc);
 	}
 
-	JValue* parseJValue(std::string str, uint32_t& start)
+	JValue* parseJValue(std::string str, uint32_t& start, JMalloc*& malloc)
 	{
 		char startC = str[start];
 
 		if (isIntStart(startC))
 		{
-			return parseJIntOrFloat(str, start);
+			return parseJIntOrFloat(str, start, malloc);
 		}
 
 		if (startC == '{')
 		{
 			++start;
-			return parseJObject(str, start);
+			return parseJObject(str, start, malloc);
 		}
 
 		if (startC == '[')
 		{
 			++start;
-			return parseJArray(str, start);
+			return parseJArray(str, start, malloc);
 		}
 
 		if (startC == 't' || startC == 'f')
 		{
-			JBool* bVal = parseJBool(str, start);
+			JBool* bVal = parseJBool(str, start, malloc);
 			if (bVal) return bVal;
 		}
 
@@ -769,13 +816,26 @@ namespace ElusiveJSON
 			return nullptr;
 		}
 
-		return new JString(parseSomeString(str, start));
+		auto string = parseSomeString(str, start, malloc);
+
+		char* strMem = (char*)malloc->allocate(string.length());
+		std::memcpy(strMem, str.c_str(), string.length());
+
+		return malloc->allocString(strMem, string.length());
 	}
 
-	JValue* parseJValue(std::string str)
+	JValue* parseJValue(std::string str, JMalloc*& malloc)
 	{
 		uint32_t start = 0;
-		return parseJValue(str, start);
+
+		if (malloc == nullptr)
+		{
+			//The resulting data structure will likely be smaller than the string,
+			//so allocating that much memory is a good idea to ensure it all fits.
+			malloc = new JMalloc(str.length());
+		}
+
+		return parseJValue(str, start, malloc);
 	}
 
 }

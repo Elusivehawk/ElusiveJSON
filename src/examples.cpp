@@ -26,7 +26,8 @@ int main()
 
 	jsonData = std::string(rawData);
 
-	JObject* jobj = parseJObject(jsonData);
+	JMalloc* malloc = new JMalloc(size);
+	JObject* jobj = parseJObject(jsonData, malloc);
 
 	std::cout << jobj->toString(true) << std::endl;
 
