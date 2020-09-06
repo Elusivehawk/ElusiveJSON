@@ -362,6 +362,12 @@ namespace ElusiveJSON
 
 			current = 0;
 
+			if (next)
+			{
+				next->clear(secure);
+
+			}
+
 		}
 
 		JBool* allocBool(bool v) { return new(allocate(1)) JBool(v); }
