@@ -554,7 +554,7 @@ namespace ElusiveJSON
 				if (isHex || isFloat || hasExponent)
 				{
 					char buf[256];
-					sprintf_s(buf, 256, "Invalud char found in int at %u: \'%c\'", start, c);
+					sprintf_s(buf, 256, "Invalud char found in int at %u:%u: \'%c\'", read.line, read.lineChar, c);
 					throw std::exception(buf);
 				}
 
@@ -562,7 +562,7 @@ namespace ElusiveJSON
 				if (consumed == 0 || !isInt(str[start + 1]))
 				{
 					char buf[256];
-					sprintf_s(buf, 256, "Invalud char found in int at %u: \'%c\'", start, c);
+					sprintf_s(buf, 256, "Invalud char found in int at line %u:%u: \'%c\'", read.line, read.lineChar, c);
 					throw std::exception(buf);
 				}
 #endif
@@ -585,7 +585,7 @@ namespace ElusiveJSON
 				if (expSign != '-' && expSign != '+' && !isInt(c))//Apparently signage is optional
 				{
 					char buf[256];
-					sprintf_s(buf, 256, "Invalud exponent signage in int at %u: \'%c\'", start, c);
+					sprintf_s(buf, 256, "Invalud exponent signage in int at line %u:%u: \'%c\'", read.line, read.lineChar, c);
 					throw std::exception(buf);
 				}
 
@@ -628,21 +628,21 @@ namespace ElusiveJSON
 
 			if (c == '\\')
 			{
-				switch (str[start]/*now points to the next char*/)
+				switch (str[read.current]/*now points to the next char*/)
 				{
-					case '\"': c = '\"'; ++start; break;// In both of these cases, it could confuse an escaped quote for an end quote
+					case '\"': c = '\"'; read.next(); break;// In both of these cases, it could confuse an escaped quote for an end quote
 #ifdef ELUSIVEJSON_ENABLE_JSON5
-					case '\'': c = '\''; ++start; break;
+					case '\'': c = '\''; read.next(); break;
 					case '\n':
 #endif
 					case 'n': c = '\n'; break;
 					case 'u': {
 						for (int i = 1; i <= 4; ++i)
 						{
-							if (!isHexInt(str[start + i]))
+							if (!isHexInt(str[read.current + i]))
 							{
 								char buf[256];
-								sprintf_s(buf, 256, "Malformed UTF-8 string literal at %u", start);
+								sprintf_s(buf, 256, "Malformed UTF-8 string literal at line %u:%u", read.line, read.lineChar);
 								throw std::exception(buf);
 							}
 						}
@@ -655,7 +655,7 @@ namespace ElusiveJSON
 					case 'f': c = '\f'; break;
 					default: {
 						char buf[256];
-						sprintf_s(buf, 256, "Invalud value at %u: \'%c\'", start, c);
+						sprintf_s(buf, 256, "Invalud value at line %u:%u: \'%c\'", read.line, read.lineChar, c);
 						throw std::exception(buf);
 					}
 				}
