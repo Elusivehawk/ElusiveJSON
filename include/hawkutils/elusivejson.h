@@ -408,14 +408,9 @@ namespace ElusiveJSON
 		return isInt(c) || (c >= 'A' && c <= 'F');
 	}
 
-	bool isIntStart(char c)
+	bool isIntStart(char c, bool enableJSON5)
 	{
-		return isInt(c) || c == '-'
-			/*JSON 5 support (lord I regret this)*/ 
-#ifdef ELUSIVEJSON_ENABLE_JSON5
-			|| c == '.' || c == '+'
-#endif
-			;
+		return isInt(c) || c == '-' || (enableJSON5 && ( c == '.' || c == '+'));
 	}
 
 	bool isASCIILetter(char c)
@@ -855,7 +850,7 @@ namespace ElusiveJSON
 	{
 		char startC = str[read.current];
 
-		if (isIntStart(startC))
+		if (isIntStart(startC, enableJSON5))
 		{
 			return parseJIntOrFloat(str, read, malloc, enableJSON5);
 		}
