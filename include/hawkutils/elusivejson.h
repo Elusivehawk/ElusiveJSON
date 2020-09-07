@@ -365,7 +365,6 @@ namespace ElusiveJSON
 			if (next)
 			{
 				next->clear(secure);
-
 			}
 
 		}
@@ -451,9 +450,9 @@ namespace ElusiveJSON
 
 	//Core API forward declarations
 
-	JValue* parseJValue(std::string str, uint32_t& start, JMalloc*& malloc);
+	JValue* parseJValue(const std::string& str, uint32_t& start, JMalloc*& malloc);
 
-	JBool* parseJBool(std::string str, uint32_t& start, JMalloc*& malloc)
+	JBool* parseJBool(const std::string& str, uint32_t& start, JMalloc*& malloc)
 	{
 		if (str.substr(start, 4) == "true")
 		{
@@ -469,28 +468,32 @@ namespace ElusiveJSON
 		return nullptr;
 	}
 
-	JValue* parseJIntOrFloat(std::string str, uint32_t& start, JMalloc*& malloc)
+	JValue* parseJIntOrFloat(const std::string& str, uint32_t& start, JMalloc*& malloc)
 	{
 		std::stringstream ss;
 		bool isHex = false;
 		bool isFloat = false;
 		bool hasExponent = false;
 		int consumed = 0;//For sanity checking against non-JSON 5 ints
+		int sign = 1;
+
+		if (str[start] == '-')
+		{
+			++start;
+			sign = -1;
+		}
 
 #ifdef ELUSIVEJSON_ENABLE_JSON5
 		if (str[start] == '∞')
 		{
-			return malloc->allocFloat(std::numeric_limits<float>::infinity());
-		}
-
-		if (str[start] == '-' && str[start + 1] == '∞')
-		{
-			return malloc->allocFloat(std::numeric_limits<float>::infinity() * -1.0f);
+			++start;
+			return malloc->allocFloat(std::numeric_limits<float>::infinity() * sign);
 		}
 
 		if (str.substr(start, 3) == "NaN")
 		{
-			return malloc->allocFloat(NAN);
+			++start;
+			return malloc->allocFloat(NAN * sign);
 		}
 
 		if (str[start] == '0' && str[start + 1] == 'x')
@@ -546,9 +549,9 @@ namespace ElusiveJSON
 				++start;
 				++consumed;
 
-				char sign = str[start];
+				char expSign = str[start];
 
-				if (sign != '-' && sign != '+' && !isInt(c))//Apparently signage is optional
+				if (expSign != '-' && expSign != '+' && !isInt(c))//Apparently signage is optional
 				{
 					char buf[256];
 					sprintf_s(buf, 256, "Invalud exponent signage in int at %u: \'%c\'", start, c);
@@ -569,16 +572,16 @@ namespace ElusiveJSON
 		{
 			float f;
 			ss >> f;
-			return malloc->allocFloat(f);
+			return malloc->allocFloat(f * sign);
 		}
 
 		int i;
 		ss >> i;
 
-		return malloc->allocInt(i);
+		return malloc->allocInt(i * sign);
 	}
 
-	std::string parseStringValue(std::string str, uint32_t& start, JMalloc*& malloc, char delim)
+	std::string parseStringValue(const std::string& str, uint32_t& start, JMalloc*& malloc, char delim)
 	{
 		std::stringstream ss;
 
@@ -640,7 +643,7 @@ namespace ElusiveJSON
 		return ss.str();
 	}
 
-	std::string parseUnquotedString(std::string str, uint32_t& start, JMalloc*& malloc)
+	std::string parseUnquotedString(const std::string& str, uint32_t& start, JMalloc*& malloc)
 	{
 		char c = str[start];
 		std::stringstream ss;
@@ -662,7 +665,7 @@ namespace ElusiveJSON
 		return ss.str();
 	}
 
-	std::string parseSomeString(std::string str, uint32_t& start, JMalloc*& malloc)
+	std::string parseSomeString(const std::string& str, uint32_t& start, JMalloc*& malloc)
 	{
 		char startC = str[start];
 
@@ -685,7 +688,7 @@ namespace ElusiveJSON
 #endif
 	}
 
-	JArray* parseJArray(std::string str, uint32_t& start, JMalloc*& malloc)
+	JArray* parseJArray(const std::string& str, uint32_t& start, JMalloc*& malloc)
 	{
 		std::vector<JValue*> vals;
 		bool expectNextObj = false;
@@ -734,7 +737,7 @@ namespace ElusiveJSON
 		return malloc->allocArray(array, vals.size());
 	}
 
-	JObject* parseJObject(std::string str, uint32_t& start, JMalloc*& malloc)
+	JObject* parseJObject(const std::string& str, uint32_t& start, JMalloc*& malloc)
 	{
 		JObject* ret = malloc->allocObject();
 		bool expectNextObj = false;
@@ -797,7 +800,7 @@ namespace ElusiveJSON
 		return ret;
 	}
 
-	JObject* parseJObject(std::string str, JMalloc*& malloc)
+	JObject* parseJObject(const std::string& str, JMalloc*& malloc)
 	{
 		uint32_t start = 0;
 
@@ -818,7 +821,7 @@ namespace ElusiveJSON
 		return parseJObject(str, start, malloc);
 	}
 
-	JValue* parseJValue(std::string str, uint32_t& start, JMalloc*& malloc)
+	JValue* parseJValue(const std::string& str, uint32_t& start, JMalloc*& malloc)
 	{
 		char startC = str[start];
 
@@ -858,7 +861,7 @@ namespace ElusiveJSON
 		return malloc->allocString(strMem, parsedStr.length());
 	}
 
-	JValue* parseJValue(std::string str, JMalloc*& malloc)
+	JValue* parseJValue(const std::string& str, JMalloc*& malloc)
 	{
 		uint32_t start = 0;
 

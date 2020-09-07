@@ -30,5 +30,5 @@ int main()
 	JObject* jobj = parseJObject(jsonData, malloc);
 
 	std::cout << jobj->toString(true) << std::endl;
-	
+
 }
