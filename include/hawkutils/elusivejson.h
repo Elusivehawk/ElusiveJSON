@@ -1,10 +1,4 @@
 ﻿
-//NOTE: Define ELUSIVEJSON_DISABLE_JSON5 to disable JSON 5 support
-
-#ifndef ELUSIVEJSON_DISABLE_JSON5
-#define ELUSIVEJSON_ENABLE_JSON5
-#endif
-
 #pragma once
 
 #include <cstdio>
@@ -17,6 +11,9 @@
 
 namespace ElusiveJSON
 {
+	constexpr bool JSON5_ENABLE = true;
+	constexpr bool JSON5_DISABLE = false;
+
 	class NoImplError : public std::logic_error
 	{
 	public:
@@ -401,13 +398,40 @@ namespace ElusiveJSON
 
 	};
 
-	void skipWhitespace(std::string str, JReadData& read)
+	inline bool isInt(char c)
+	{
+		return (c >= '0' && c <= '9');
+	}
+
+	inline bool isHexInt(char c)
+	{
+		return isInt(c) || (c >= 'A' && c <= 'F');
+	}
+
+	bool isIntStart(char c)
+	{
+		return isInt(c) || c == '-'
+			/*JSON 5 support (lord I regret this)*/ 
+#ifdef ELUSIVEJSON_ENABLE_JSON5
+			|| c == '.' || c == '+'
+#endif
+			;
+	}
+
+	bool isASCIILetter(char c)
+	{
+		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+	}
+
+	//Core API functions
+
+	void skipWhitespace(std::string str, JReadData& read, bool enableJSON5)
 	{
 		while (true)
 		{
-#ifdef ELUSIVEJSON_ENABLE_JSON5
-			if (str[read.current] == '/')
+			if (enableJSON5 && str[read.current] == '/')
 			{
+				//Comment skipping
 				if (str[read.current + 1] == '/')
 				{
 					read.next(2);
@@ -438,8 +462,6 @@ namespace ElusiveJSON
 
 			}
 
-#endif
-			
 			switch (str[read.current])
 			{
 				case '\n': read.newline(); continue;
@@ -454,36 +476,9 @@ namespace ElusiveJSON
 
 	}
 
-	inline bool isInt(char c)
-	{
-		return (c >= '0' && c <= '9');
-	}
+	JValue* parseJValue(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5);
 
-	inline bool isHexInt(char c)
-	{
-		return isInt(c) || (c >= 'A' && c <= 'F');
-	}
-
-	bool isIntStart(char c)
-	{
-		return isInt(c) || c == '-'
-			/*JSON 5 support (lord I regret this)*/ 
-#ifdef ELUSIVEJSON_ENABLE_JSON5
-			|| c == '.' || c == '+'
-#endif
-			;
-	}
-
-	bool isASCIILetter(char c)
-	{
-		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-	}
-
-	//Core API functions
-
-	JValue* parseJValue(const std::string& str, JReadData& read, JMalloc*& malloc);
-
-	JBool* parseJBool(const std::string& str, JReadData& read, JMalloc*& malloc)
+	JBool* parseJBool(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5)
 	{
 		if (str.substr(read.current, 4) == "true")
 		{
@@ -499,7 +494,7 @@ namespace ElusiveJSON
 		return nullptr;
 	}
 
-	JValue* parseJIntOrFloat(const std::string& str, JReadData& read, JMalloc*& malloc)
+	JValue* parseJIntOrFloat(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5)
 	{
 		std::stringstream ss;
 		bool isHex = false;
@@ -514,29 +509,31 @@ namespace ElusiveJSON
 			sign = -1;
 		}
 
-#ifdef ELUSIVEJSON_ENABLE_JSON5
-		if (str[read.current] == '∞')
+		if (enableJSON5)
 		{
-			read.next();
-			return malloc->allocFloat(std::numeric_limits<float>::infinity() * sign);
-		}
+			if (str[read.current] == '∞')
+			{
+				read.next();
+				return malloc->allocFloat(std::numeric_limits<float>::infinity() * sign);
+			}
 
-		if (str.substr(read.current, 3) == "NaN")
-		{
-			read.next();
-			return malloc->allocFloat(NAN * sign);
-		}
+			if (str.substr(read.current, 3) == "NaN")
+			{
+				read.next();
+				return malloc->allocFloat(NAN * sign);
+			}
 
-		if (str[read.current] == '0' && str[read.current + 1] == 'x')
-		{
-			isHex = true;
-			ss << std::hex;
-			ss << str[read.current] << str[read.current + 1];
-			read.next(2);
-			consumed += 2;
+			if (str[read.current] == '0' && str[read.current + 1] == 'x')
+			{
+				isHex = true;
+				ss << std::hex;
+				ss << str[read.current] << str[read.current + 1];
+				read.next(2);
+				consumed += 2;
+
+			}
 
 		}
-#endif
 
 		while (true)
 		{
@@ -558,14 +555,12 @@ namespace ElusiveJSON
 					throw std::exception(buf);
 				}
 
-#ifdef ELUSIVEJSON_DISABLE_JSON5
-				if (consumed == 0 || !isInt(str[start + 1]))
+				if (!enableJSON5 && (consumed == 0 || !isInt(str[read.current + 1])))
 				{
 					char buf[256];
 					sprintf_s(buf, 256, "Invalud char found in int at line %u:%u: \'%c\'", read.line, read.lineChar, c);
 					throw std::exception(buf);
 				}
-#endif
 
 				isFloat = true;
 				ss << c;
@@ -612,7 +607,7 @@ namespace ElusiveJSON
 		return malloc->allocInt(i * sign);
 	}
 
-	std::string parseStringValue(const std::string& str, JReadData& read, JMalloc*& malloc, char delim)
+	std::string parseStringValue(const std::string& str, JReadData& read, JMalloc*& malloc, char delim, bool enableJSON5)
 	{
 		std::stringstream ss;
 
@@ -628,13 +623,12 @@ namespace ElusiveJSON
 
 			if (c == '\\')
 			{
-				switch (str[read.current]/*now points to the next char*/)
+				bool valid = true;
+				char nxt = str[read.current];/*now points to the next char*/
+
+				switch (nxt)
 				{
-					case '\"': c = '\"'; read.next(); break;// In both of these cases, it could confuse an escaped quote for an end quote
-#ifdef ELUSIVEJSON_ENABLE_JSON5
-					case '\'': c = '\''; read.next(); break;
-					case '\n':
-#endif
+					case '\"': c = '\"'; read.next(); break;// it could confuse an escaped quote for an end quote
 					case 'n': c = '\n'; break;
 					case 'u': {
 						for (int i = 1; i <= 4; ++i)
@@ -653,19 +647,30 @@ namespace ElusiveJSON
 					case 'b': c = '\b'; break;
 					case 'r': c = '\r'; break;
 					case 'f': c = '\f'; break;
-					default: {
-						char buf[256];
-						sprintf_s(buf, 256, "Invalud value at line %u:%u: \'%c\'", read.line, read.lineChar, c);
-						throw std::exception(buf);
-					}
+					default: valid = false;
 				}
+
+				if (enableJSON5 && (nxt == '\'' || nxt == '\n'))
+				{
+					c = nxt;
+					valid = true;
+					read.next();
+
+				}
+				
+				if (!valid)
+				{
+					char buf[256];
+					sprintf_s(buf, 256, "Invalud value at line %u:%u: \'%c\'", read.line, read.lineChar, c);
+					throw std::exception(buf);
+				}
+
 			}
-#ifdef ELUSIVEJSON_DISABLE_JSON5
-			if (c == '\n')
+
+			if (!enableJSON5 && c == '\n')
 			{
 				throw std::exception("Newlines not allowed in strings");
 			}
-#endif
 
 			ss << c;
 
@@ -674,8 +679,15 @@ namespace ElusiveJSON
 		return ss.str();
 	}
 
-	std::string parseUnquotedString(const std::string& str, JReadData& read, JMalloc*& malloc)
+	std::string parseUnquotedString(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5)
 	{
+		if (!enableJSON5)
+		{
+			char buf[256];
+			sprintf_s(buf, 256, "Invalud string literal at line %u:%u", read.line, read.lineChar);
+			throw std::exception(buf);
+		}
+
 		char c = str[read.current];
 		std::stringstream ss;
 
@@ -696,30 +708,20 @@ namespace ElusiveJSON
 		return ss.str();
 	}
 
-	std::string parseSomeString(const std::string& str, JReadData& read, JMalloc*& malloc)
+	std::string parseSomeString(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5)
 	{
 		char startC = str[read.current];
 
-		if (startC == '\"'
-#ifdef ELUSIVEJSON_ENABLE_JSON5
-			|| startC == '\''
-#endif
-		)
+		if (startC == '\"' || (enableJSON5 && startC == '\''))
 		{
 			read.next();
-			return parseStringValue(str, read, malloc, startC);
+			return parseStringValue(str, read, malloc, startC, enableJSON5);
 		}
 
-#ifdef ELUSIVEJSON_DISABLE_JSON5
-		char buf[256];
-		sprintf_s(buf, 256, "Invalud string literal at %u", start);
-		throw std::exception(buf);
-#else
-		return parseUnquotedString(str, read, malloc);
-#endif
+		return parseUnquotedString(str, read, malloc, enableJSON5);
 	}
 
-	JArray* parseJArray(const std::string& str, JReadData& read, JMalloc*& malloc)
+	JArray* parseJArray(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5)
 	{
 		std::vector<JValue*> vals;
 		bool expectNextObj = false;
@@ -728,14 +730,12 @@ namespace ElusiveJSON
 		{
 			if (str[read.current] == ']')
 			{
-#ifdef ELUSIVEJSON_DISABLE_JSON5
-				if (expectNextObj)
+				if (!enableJSON5 && expectNextObj)
 				{
 					char buf[256];
-					sprintf_s(buf, 256, "Trailing comma found at %u'", start);
+					sprintf_s(buf, 256, "Trailing comma found at line %u:%u", read.line, read.lineChar);
 					throw std::exception(buf);
 				}
-#endif
 
 				read.next();
 				break;
@@ -743,9 +743,9 @@ namespace ElusiveJSON
 
 			expectNextObj = false;
 
-			skipWhitespace(str, read);
+			skipWhitespace(str, read, enableJSON5);
 
-			JValue* val = parseJValue(str, read, malloc);
+			JValue* val = parseJValue(str, read, malloc, enableJSON5);
 
 			vals.push_back(val);
 
@@ -769,26 +769,24 @@ namespace ElusiveJSON
 		return malloc->allocArray(array, vals.size());
 	}
 
-	JObject* parseJObject(const std::string& str, JReadData& read, JMalloc*& malloc)
+	JObject* parseJObject(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5)
 	{
 		JObject* ret = malloc->allocObject();
 		bool expectNextObj = false;
 
 		while (true)
 		{
-			skipWhitespace(str, read);
+			skipWhitespace(str, read, enableJSON5);
 
 			if (str[read.current] == '}')
 			{
-#ifdef ELUSIVEJSON_DISABLE_JSON5
-				if (expectNextObj)
+				if (!enableJSON5 && expectNextObj)
 				{
 					char buf[256];
-					sprintf_s(buf, 256, "Trailing comma found at %u'", start);
+					sprintf_s(buf, 256, "Trailing comma found at line %u:%u'", read.line, read.lineChar);
 					throw std::exception(buf);
 				}
-#endif
-				
+
 				read.next();
 				break;
 			}
@@ -802,9 +800,9 @@ namespace ElusiveJSON
 
 			expectNextObj = false;
 
-			std::string key = parseSomeString(str, read, malloc);
+			std::string key = parseSomeString(str, read, malloc, enableJSON5);
 
-			skipWhitespace(str, read);
+			skipWhitespace(str, read, enableJSON5);
 
 			if (str[read.current] != ':')
 			{
@@ -815,9 +813,9 @@ namespace ElusiveJSON
 
 			read.next();
 
-			skipWhitespace(str, read);
+			skipWhitespace(str, read, enableJSON5);
 
-			JValue* val = parseJValue(str, read, malloc);
+			JValue* val = parseJValue(str, read, malloc, enableJSON5);
 
 			ret->setValue(key, val);
 
@@ -832,11 +830,11 @@ namespace ElusiveJSON
 		return ret;
 	}
 
-	JObject* parseJObject(const std::string& str, JMalloc*& malloc)
+	JObject* parseJObject(const std::string& str, JMalloc*& malloc, bool enableJSON5 = JSON5_DISABLE)
 	{
 		JReadData read;
 
-		skipWhitespace(str, read);
+		skipWhitespace(str, read, enableJSON5);
 
 		if (str[read.current] != '{')
 		{
@@ -850,42 +848,43 @@ namespace ElusiveJSON
 			malloc = new JMalloc(str.length());
 		}
 
-		return parseJObject(str, read, malloc);
+		return parseJObject(str, read, malloc, enableJSON5);
 	}
 
-	JValue* parseJValue(const std::string& str, JReadData& read, JMalloc*& malloc)
+	JValue* parseJValue(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5)
 	{
 		char startC = str[read.current];
 
 		if (isIntStart(startC))
 		{
-			return parseJIntOrFloat(str, read, malloc);
+			return parseJIntOrFloat(str, read, malloc, enableJSON5);
 		}
 
 		if (startC == '{')
 		{
 			read.next();
-			return parseJObject(str, read, malloc);
+			return parseJObject(str, read, malloc, enableJSON5);
 		}
 
 		if (startC == '[')
 		{
 			read.next();
-			return parseJArray(str, read, malloc);
+			return parseJArray(str, read, malloc, enableJSON5);
 		}
 
 		if (startC == 't' || startC == 'f')
 		{
-			JBool* bVal = parseJBool(str, read, malloc);
+			JBool* bVal = parseJBool(str, read, malloc, enableJSON5);
 			if (bVal) return bVal;
 		}
 
+		//TODO figure out what to do with this, this looks terrible
 		if (startC == 'n' && str.substr(read.current, 4) == "null")
 		{
 			return nullptr;
 		}
 
-		std::string parsedStr = parseSomeString(str, read, malloc);
+		std::string parsedStr = parseSomeString(str, read, malloc, enableJSON5);
 
 		char* strMem = (char*)malloc->allocate(parsedStr.length());
 		std::memcpy(strMem, parsedStr.c_str(), parsedStr.length());
@@ -893,7 +892,7 @@ namespace ElusiveJSON
 		return malloc->allocString(strMem, parsedStr.length());
 	}
 
-	JValue* parseJValue(const std::string& str, JMalloc*& malloc)
+	JValue* parseJValue(const std::string& str, JMalloc*& malloc, bool enableJSON5 = JSON5_DISABLE)
 	{
 		JReadData read;
 
@@ -904,7 +903,7 @@ namespace ElusiveJSON
 			malloc = new JMalloc(str.length());
 		}
 
-		return parseJValue(str, read, malloc);
+		return parseJValue(str, read, malloc, enableJSON5);
 	}
 
 }
