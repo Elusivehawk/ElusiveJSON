@@ -9,11 +9,14 @@
 #include <string>
 #include <vector>
 
+/*
+TODO:
+
+Add support for wide chars, wide strings, etc.
+*/
+
 namespace ElusiveJSON
 {
-	constexpr bool JSON5_ENABLE = true;
-	constexpr bool JSON5_DISABLE = false;
-
 	class NoImplError : public std::logic_error
 	{
 	public:
@@ -29,8 +32,8 @@ namespace ElusiveJSON
 		uint64_t current = 0;
 		uint32_t line = 0;
 		uint32_t lineChar = 0;
-
-		void next(int incr = 1)
+		
+		void next(uint32_t incr = 1)
 		{
 			current += incr;
 			lineChar += incr;
@@ -136,7 +139,7 @@ namespace ElusiveJSON
 		const char* string;
 		const size_t length;
 	public:
-		JString(const char* str, size_t len) : string(str), length(len){}
+		JString(const char* text, size_t len) : string(text), length(len){}
 
 		std::string strValue()
 		{
@@ -335,7 +338,7 @@ namespace ElusiveJSON
 
 		size_t memUsed()
 		{
-			return current;
+			return current + (next ? next->memUsed() : 0);
 		}
 
 		void copy(char* to, size_t offset)
@@ -377,7 +380,7 @@ namespace ElusiveJSON
 		{
 			if (secure)
 			{
-				std::memset(data, 0, memUsed());
+				std::memset(data, 0, current);
 			}
 
 			current = 0;
@@ -392,25 +395,22 @@ namespace ElusiveJSON
 		JBool* allocBool(bool v) { return new(allocate(1)) JBool(v); }
 		JInt* allocInt(int v) { return new(allocate(4, 4)) JInt(v); }
 		JFloat* allocFloat(float v) { return new(allocate(4, 4)) JFloat(v); }
-		JString* allocString(const char* str, size_t length) { return new(allocate(sizeof(JString), 8)) JString(str, length); }
+		JString* allocString(const char* text, size_t length) { return new(allocate(sizeof(JString), 8)) JString(text, length); }
 		JArray* allocArray(JValue** arr, size_t length) { return new(allocate(sizeof(JArray), 8)) JArray(arr, length); }
 		JObject* allocObject() { return new(allocate(sizeof(JObject), 8)) JObject(); }
 
 	};
 
-	inline bool isInt(char c)
+	//Core API
+
+	bool isInt(char c)
 	{
 		return (c >= '0' && c <= '9');
 	}
 
-	inline bool isHexInt(char c)
+	bool isHexInt(char c)
 	{
 		return isInt(c) || (c >= 'A' && c <= 'F');
-	}
-
-	bool isIntStart(char c, bool enableJSON5)
-	{
-		return isInt(c) || c == '-' || (enableJSON5 && ( c == '.' || c == '+'));
 	}
 
 	bool isASCIILetter(char c)
@@ -418,224 +418,258 @@ namespace ElusiveJSON
 		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 	}
 
-	//Core API functions
-
-	void skipWhitespace(std::string str, JReadData& read, bool enableJSON5)
+	class JReader
 	{
-		while (true)
+	private:
+		JMalloc* const malloc;
+		std::string* text;
+		uint64_t current = 0;
+		uint32_t line = 0;
+		uint32_t lineChar = 0;
+		bool enableJSON5 = false;
+
+	public:
+		JReader(JMalloc* mem, std::string* jsonText) : malloc(mem), text(jsonText){}
+
+		JReader* enableJSON5()
 		{
-			if (enableJSON5 && str[read.current] == '/')
+			enableJSON5 = true;
+			return this;
+		}
+
+	private:
+		void next(uint32_t incr = 1)
+		{
+			current += incr;
+			lineChar += incr;
+		}
+
+		void newline()
+		{
+			++current;
+			++line;
+			lineChar = 0;
+		}
+
+		void skipWhitespace()
+		{
+			while (true)
 			{
-				//Comment skipping
-				if (str[read.current + 1] == '/')
+				if (enableJSON5 && text[current] == '/')
 				{
-					read.next(2);
-					while (str[read.current] != '\n') { read.next(); }
-					read.newline();
-
-				}
-				else if (str[read.current + 1] == '*')
-				{
-					read.next(2);
-
-					while (str[read.current] != '*' && str[read.current + 1] != '/')
+					//Comment skipping
+					if (text[current + 1] == '/')
 					{
-						if (str[read.current] == '\n')
-							read.newline();
-						else
-							read.next();
+						next(2);
+						while (text[current] != '\n') { next(); }
+						newline();
+
+					}
+					else if (text[current + 1] == '*')
+					{
+						next(2);
+
+						while (text[current] != '*' && text[current + 1] != '/')
+						{
+							if (text[current] == '\n')
+								newline();
+							else
+								next();
+						}
+
+						next(2);
+
+					}
+					else
+					{
+						//FIXME
+						throw std::exception("Invalud syntax");
 					}
 
-					read.next(2);
-
 				}
-				else
+
+				switch (text[current])
 				{
-					//FIXME
-					throw std::exception("Invalud syntax");
-				}
-
-			}
-
-			switch (str[read.current])
-			{
-				case '\n': read.newline(); continue;
+				case '\n': newline(); continue;
 				case ' ':
 				case '\r':
-				case '\t': read.next(); continue;
+				case '\t': next(); continue;
 				default: break;
-			}
-
-			break;
-		}
-
-	}
-
-	JValue* parseJValue(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5);
-
-	JBool* parseJBool(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5)
-	{
-		if (str.substr(read.current, 4) == "true")
-		{
-			read.next(4);
-			return malloc->allocBool(true);
-		}
-		else if (str.substr(read.current, 5) == "false")
-		{
-			read.next(5);
-			return malloc->allocBool(false);
-		}
-
-		return nullptr;
-	}
-
-	JValue* parseJIntOrFloat(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5)
-	{
-		std::stringstream ss;
-		bool isHex = false;
-		bool isFloat = false;
-		bool hasExponent = false;
-		int consumed = 0;//For sanity checking against non-JSON 5 ints
-		int sign = 1;
-
-		if (str[read.current] == '-')
-		{
-			read.next();
-			sign = -1;
-		}
-
-		if (enableJSON5)
-		{
-			if (str[read.current] == '∞')
-			{
-				read.next();
-				return malloc->allocFloat(std::numeric_limits<float>::infinity() * sign);
-			}
-
-			if (str.substr(read.current, 3) == "NaN")
-			{
-				read.next();
-				return malloc->allocFloat(NAN * sign);
-			}
-
-			if (str[read.current] == '0' && str[read.current + 1] == 'x')
-			{
-				isHex = true;
-				ss << std::hex;
-				ss << str[read.current] << str[read.current + 1];
-				read.next(2);
-				consumed += 2;
-
-			}
-
-		}
-
-		while (true)
-		{
-			char c = str[read.current];
-
-			if (isInt(c) || (isHex && isHexInt(c)) /*Doesn't need to be checked against ELUSIVEJSON_DISABLE_JSON5 because of the isHex flag*/)
-			{
-				ss << c;
-				read.next();
-				++consumed;
-				continue;
-			}
-			else if (c == '.')
-			{
-				if (isHex || isFloat || hasExponent)
-				{
-					char buf[256];
-					sprintf_s(buf, 256, "Invalud char found in int at %u:%u: \'%c\'", read.line, read.lineChar, c);
-					throw std::exception(buf);
 				}
 
-				if (!enableJSON5 && (consumed == 0 || !isInt(str[read.current + 1])))
-				{
-					char buf[256];
-					sprintf_s(buf, 256, "Invalud char found in int at line %u:%u: \'%c\'", read.line, read.lineChar, c);
-					throw std::exception(buf);
-				}
-
-				isFloat = true;
-				ss << c;
-				read.next();
-				++consumed;
-				continue;
-			}
-			else if (c == 'e' || c == 'E')
-			{
-				hasExponent = true;
-				ss << c;
-				read.next();
-				++consumed;
-
-				char expSign = str[read.current];
-
-				if (expSign != '-' && expSign != '+' && !isInt(c))//Apparently signage is optional
-				{
-					char buf[256];
-					sprintf_s(buf, 256, "Invalud exponent signage in int at line %u:%u: \'%c\'", read.line, read.lineChar, c);
-					throw std::exception(buf);
-				}
-
-				ss << c;
-				read.next();
-				++consumed;
-				continue;
-			}
-
-			//Don't need to have any consequences for an invalid int (i.e. 400j) because after this, it will probably check for a comma. It won't find the comma, and complain.
-			break;
-		}
-
-		if (isFloat)
-		{
-			float f;
-			ss >> f;
-			return malloc->allocFloat(f * sign);
-		}
-
-		int i;
-		ss >> i;
-
-		return malloc->allocInt(i * sign);
-	}
-
-	std::string parseStringValue(const std::string& str, JReadData& read, JMalloc*& malloc, char delim, bool enableJSON5)
-	{
-		std::stringstream ss;
-
-		while (true)
-		{
-			char c = str[read.current];
-			read.next();
-
-			if (c == delim)
-			{
 				break;
 			}
 
+		}
+
+		JValue* parseJValue();
+
+		JBool* parseJBool()
+		{
+			if (text->substr(current, 4) == "true")
+			{
+				next(4);
+				return malloc->allocBool(true);
+			}
+			else if (text->substr(current, 5) == "false")
+			{
+				next(5);
+				return malloc->allocBool(false);
+			}
+
+			return nullptr;
+		}
+
+		JValue* parseJIntOrFloat()
+		{
+			std::stringstream ss;
+			bool isHex = false;
+			bool isFloat = false;
+			bool hasExponent = false;
+			int consumed = 0;//For sanity checking against non-JSON 5 ints
+			int sign = 1;
+
+			if (text->at(current) == '-')
+			{
+				next();
+				sign = -1;
+			}
+
+			if (enableJSON5)
+			{
+				if (text->at(current) == '∞')
+				{
+					next();
+					return malloc->allocFloat(std::numeric_limits<float>::infinity() * sign);
+				}
+
+				if (text->substr(current, 3) == "NaN")
+				{
+					next();
+					return malloc->allocFloat(NAN * sign);
+				}
+
+				if (text->at(current) == '0' && text->at(current + 1) == 'x')
+				{
+					isHex = true;
+					ss << std::hex;
+					ss << text[current] << text[current + 1];
+					next(2);
+					consumed += 2;
+
+				}
+
+			}
+
+			while (true)
+			{
+				char c = text->at(current);
+
+				if (isInt(c) || (isHex && isHexInt(c)))
+				{
+					ss << c;
+					next();
+					++consumed;
+					continue;
+				}
+				else if (c == '.')
+				{
+					if (isHex || isFloat || hasExponent)
+					{
+						char buf[256];
+						sprintf_s(buf, 256, "Invalud char found in int at %u:%u: \'%c\'", line, lineChar, c);
+						throw std::exception(buf);
+					}
+
+					if (!enableJSON5 && (consumed == 0 || !isInt(text[current + 1])))
+					{
+						char buf[256];
+						sprintf_s(buf, 256, "Invalud char found in int at line %u:%u: \'%c\'", line, lineChar, c);
+						throw std::exception(buf);
+					}
+
+					isFloat = true;
+					ss << c;
+					next();
+					++consumed;
+					continue;
+				}
+				else if (c == 'e' || c == 'E')
+				{
+					hasExponent = true;
+					ss << c;
+					next();
+					++consumed;
+
+					char expSign = text->at(current);
+
+					if (expSign != '-' && expSign != '+' && !isInt(c))//Apparently signage is optional
+					{
+						char buf[256];
+						sprintf_s(buf, 256, "Invalud exponent signage in int at line %u:%u: \'%c\'", line, lineChar, c);
+						throw std::exception(buf);
+					}
+
+					ss << c;
+					next();
+					++consumed;
+					continue;
+				}
+
+				//Don't need to have any consequences for an invalid int (i.e. 400j) because after this, it will probably check for a comma. It won't find the comma, and complain.
+				break;
+			}
+
+			if (isFloat)
+			{
+				float f;
+				ss >> f;
+				return malloc->allocFloat(f * sign);
+			}
+
+			int i;
+			ss >> i;
+
+			return malloc->allocInt(i * sign);
+		}
+
+		char getEscapedChar(char c)
+		{
+			bool valid = true;
+
 			if (c == '\\')
 			{
+				//TODO Add support for full UTF-8 string literals (means going over to widechar_t)
+				//When implemented, this will still return just one character
+				//Right now the current workaround is to return the backslash, then it'll interpret the next 5 chars
+				//as actual characters. Little messy, but eh.
+				if (text->at(current + 1) == 'u')
+				{
+					for (int i = 2; i <= 5; ++i)
+					{
+						if (!isHexInt(text->at(current + i)))
+						{
+							char buf[256];
+							sprintf_s(buf, 256, "Malformed UTF-8 character literal at line %u:%u", line, lineChar);
+							throw std::exception(buf);
+						}
+
+					}
+
+					return c;
+				}
+
+				next();
+
 				bool valid = true;
-				char nxt = str[read.current];/*now points to the next char*/
+				char nxt = text->at(current);
 
 				switch (nxt)
 				{
-					case '\"': c = '\"'; read.next(); break;// it could confuse an escaped quote for an end quote
+					case '\"': c = '\"'; break;
+					case '\'': c = '\''; break;
+					case '\n':
 					case 'n': c = '\n'; break;
-					case 'u': {
-						for (int i = 1; i <= 4; ++i)
-						{
-							if (!isHexInt(str[read.current + i]))
-							{
-								char buf[256];
-								sprintf_s(buf, 256, "Malformed UTF-8 string literal at line %u:%u", read.line, read.lineChar);
-								throw std::exception(buf);
-							}
-						}
-					} break;
 					case 't': c = '\t'; break;
 					case '/': c = '/'; break;
 					case '\\': c = '\\'; break;
@@ -645,260 +679,240 @@ namespace ElusiveJSON
 					default: valid = false;
 				}
 
-				if (enableJSON5 && (nxt == '\'' || nxt == '\n'))
-				{
-					c = nxt;
-					valid = true;
-					read.next();
-
-				}
-				
 				if (!valid)
 				{
 					char buf[256];
-					sprintf_s(buf, 256, "Invalud value at line %u:%u: \'%c\'", read.line, read.lineChar, c);
+					sprintf_s(buf, 256, "Invalud value at line %u:%u: \'%c\'", line, lineChar, c);
 					throw std::exception(buf);
 				}
 
 			}
 
-			if (!enableJSON5 && c == '\n')
-			{
-				throw std::exception("Newlines not allowed in strings");
-			}
-
-			ss << c;
-
+			return c;
 		}
 
-		return ss.str();
-	}
-
-	std::string parseUnquotedString(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5)
-	{
-		if (!enableJSON5)
+		std::string parseQuotedString(char delim)
 		{
+			std::stringstream ss;
+
+			while (true)
+			{
+				char c = text->at(current);
+				
+				if (c == delim)
+				{
+					next();
+					break;
+				}
+
+				ss << getEscapedChar(c);
+				next();
+
+			}
+
+			return ss.str();
+		}
+
+		std::string parseUnquotedString()
+		{
+			std::stringstream ss;
+
+			while (true)
+			{
+				char c = text->at(current);
+				
+				if (!isASCIILetter(c))
+				{
+					break;
+				}
+
+				ss << getEscapedChar(c);
+				next();
+
+			}
+
+			return ss.str();
+		}
+
+		std::string parseSomeString()
+		{
+			char delim = text->at(current);
+
+			if (delim == '\"' || (enableJSON5 && delim == '\''))
+			{
+				next();
+				return parseQuotedString(delim);
+			}
+
+			if (enableJSON5 && isASCIILetter(delim))
+			{
+				return parseUnquotedString();
+			}
+
 			char buf[256];
-			sprintf_s(buf, 256, "Invalud string literal at line %u:%u", read.line, read.lineChar);
+			sprintf_s(buf, 256, "Invalud string literal at line %u:%u: \'%c\'", line, lineChar, delim);
 			throw std::exception(buf);
 		}
 
-		char c = str[read.current];
-		std::stringstream ss;
-
-		if (!isASCIILetter(c))
+		JArray* parseJArray()
 		{
-			char buf[256];
-			sprintf_s(buf, 256, "Invalud value at %u:%u: \'%c\'", read.line, read.lineChar, c);
-			throw std::exception(buf);
-		}
+			std::vector<JValue*> vals;
+			bool expectNextObj = false;
 
-		while (isASCIILetter(c = str[read.current]))
-		{
-			ss << c;
-			read.next();
-
-		}
-
-		return ss.str();
-	}
-
-	std::string parseSomeString(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5)
-	{
-		char startC = str[read.current];
-
-		if (startC == '\"' || (enableJSON5 && startC == '\''))
-		{
-			read.next();
-			return parseStringValue(str, read, malloc, startC, enableJSON5);
-		}
-
-		return parseUnquotedString(str, read, malloc, enableJSON5);
-	}
-
-	JArray* parseJArray(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5)
-	{
-		std::vector<JValue*> vals;
-		bool expectNextObj = false;
-
-		while (true)
-		{
-			if (str[read.current] == ']')
+			while (true)
 			{
-				if (!enableJSON5 && expectNextObj)
+				if (text->at(current) == ']')
 				{
-					char buf[256];
-					sprintf_s(buf, 256, "Trailing comma found at line %u:%u", read.line, read.lineChar);
-					throw std::exception(buf);
+					if (!enableJSON5 && expectNextObj)
+					{
+						char buf[256];
+						sprintf_s(buf, 256, "Trailing comma found at line %u:%u", line, lineChar);
+						throw std::exception(buf);
+					}
+
+					next();
+					break;
 				}
 
-				read.next();
-				break;
-			}
+				expectNextObj = false;
 
-			expectNextObj = false;
+				skipWhitespace(text, read, enableJSON5);
 
-			skipWhitespace(str, read, enableJSON5);
+				JValue* val = parseJValue(text, read, malloc, enableJSON5);
 
-			JValue* val = parseJValue(str, read, malloc, enableJSON5);
+				vals.push_back(val);
 
-			vals.push_back(val);
-
-			if (str[read.current] == ',')
-			{
-				expectNextObj = true;
-				read.next();
-
-			}
-
-		}
-
-		JValue** array = (JValue**)malloc->allocate(vals.size() * sizeof(void*), sizeof(void*));
-		
-		for (uint32_t i = 0; i < vals.size(); ++i)
-		{
-			array[i] = vals.at(i);
-
-		}
-
-		return malloc->allocArray(array, vals.size());
-	}
-
-	JObject* parseJObject(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5)
-	{
-		JObject* ret = malloc->allocObject();
-		bool expectNextObj = false;
-
-		while (true)
-		{
-			skipWhitespace(str, read, enableJSON5);
-
-			if (str[read.current] == '}')
-			{
-				if (!enableJSON5 && expectNextObj)
+				if (text[current] == ',')
 				{
-					char buf[256];
-					sprintf_s(buf, 256, "Trailing comma found at line %u:%u'", read.line, read.lineChar);
-					throw std::exception(buf);
+					expectNextObj = true;
+					next();
+
 				}
 
-				read.next();
-				break;
 			}
 
-			if (str[read.current] == ',')
+			JValue** array = (JValue**)malloc->allocate(vals.size() * sizeof(void*), sizeof(void*));
+
+			for (uint32_t i = 0; i < vals.size(); ++i)
+			{
+				array[i] = vals.at(i);
+
+			}
+
+			return malloc->allocArray(array, vals.size());
+		}
+
+	public:
+		JObject* parseJObject()
+		{
+			if (text->at(current) != '{')
 			{
 				char buf[256];
-				sprintf_s(buf, 256, "Erroneous comma found at line %u:%u'", read.line, read.lineChar);
+				sprintf_s(buf, 256, "Invalid JSON object at line %u:%u", line, lineChar);
 				throw std::exception(buf);
 			}
 
-			expectNextObj = false;
+			next();
 
-			std::string key = parseSomeString(str, read, malloc, enableJSON5);
+			JObject* ret = malloc->allocObject();
+			bool expectNextObj = false;
 
-			skipWhitespace(str, read, enableJSON5);
-
-			if (str[read.current] != ':')
+			while (true)
 			{
-				char buf[256];
-				sprintf_s(buf, 256, "Invalud value at %u:%u: \'%c\'", read.line, read.lineChar, str[read.current]);
-				throw std::exception(buf);
+				skipWhitespace();
+
+				if (text->at(current) == '}')
+				{
+					if (!enableJSON5 && expectNextObj)
+					{
+						char buf[256];
+						sprintf_s(buf, 256, "Trailing comma found at line %u:%u", line, lineChar);
+						throw std::exception(buf);
+					}
+
+					next();
+					break;
+				}
+
+				if (text->at(current) == ',')
+				{
+					char buf[256];
+					sprintf_s(buf, 256, "Erroneous comma found at line %u:%u'", line, lineChar);
+					throw std::exception(buf);
+				}
+
+				expectNextObj = false;
+
+				std::string key = parseSomeString();
+
+				skipWhitespace();
+
+				if (text->at(current) != ':')
+				{
+					char buf[256];
+					sprintf_s(buf, 256, "Invalud value at %u:%u: \'%c\'", line, lineChar, text[current]);
+					throw std::exception(buf);
+				}
+
+				next();
+
+				skipWhitespace();
+
+				JValue* val = parseJValue();
+
+				ret->setValue(key, val);
+
+				if (text->at(current) == ',')
+				{
+					expectNextObj = true;
+					next();
+				}
+
 			}
 
-			read.next();
+			return ret;
+		}
 
-			skipWhitespace(str, read, enableJSON5);
+		JValue* parseJValue()
+		{
+			char startC = text->at(current);
 
-			JValue* val = parseJValue(str, read, malloc, enableJSON5);
-
-			ret->setValue(key, val);
-
-			if (str[read.current] == ',')
+			if (isInt(startC) || startC == '-' || (enableJSON5 && (startC == '.' || startC == '+')))
 			{
-				expectNextObj = true;
-				read.next();
+				return parseJIntOrFloat();
 			}
 
+			if (startC == '{')
+			{
+				return parseJObject();
+			}
+
+			if (startC == '[')
+			{
+				next();
+				return parseJArray();
+			}
+
+			if (startC == 't' || startC == 'f')
+			{
+				JBool* bVal = parseJBool();
+				if (bVal) return bVal;
+			}
+
+			//TODO figure out what to do with this, this looks terrible
+			if (startC == 'n' && text->substr(current, 4) == "null")
+			{
+				return nullptr;
+			}
+
+			std::string parsedStr = parseSomeString();
+
+			char* strMem = (char*)malloc->allocate(parsedStr.length());
+			std::memcpy(strMem, parsedStr.c_str(), parsedStr.length());
+
+			return malloc->allocString(strMem, parsedStr.length());
 		}
 
-		return ret;
-	}
-
-	JObject* parseJObject(const std::string& str, JMalloc*& malloc, bool enableJSON5 = JSON5_DISABLE)
-	{
-		JReadData read;
-
-		skipWhitespace(str, read, enableJSON5);
-
-		if (str[read.current] != '{')
-		{
-			throw std::exception("Invalud JSON object");
-		}
-
-		read.next();
-
-		if (malloc == nullptr)
-		{
-			malloc = new JMalloc(str.length());
-		}
-
-		return parseJObject(str, read, malloc, enableJSON5);
-	}
-
-	JValue* parseJValue(const std::string& str, JReadData& read, JMalloc*& malloc, bool enableJSON5)
-	{
-		char startC = str[read.current];
-
-		if (isIntStart(startC, enableJSON5))
-		{
-			return parseJIntOrFloat(str, read, malloc, enableJSON5);
-		}
-
-		if (startC == '{')
-		{
-			read.next();
-			return parseJObject(str, read, malloc, enableJSON5);
-		}
-
-		if (startC == '[')
-		{
-			read.next();
-			return parseJArray(str, read, malloc, enableJSON5);
-		}
-
-		if (startC == 't' || startC == 'f')
-		{
-			JBool* bVal = parseJBool(str, read, malloc, enableJSON5);
-			if (bVal) return bVal;
-		}
-
-		//TODO figure out what to do with this, this looks terrible
-		if (startC == 'n' && str.substr(read.current, 4) == "null")
-		{
-			return nullptr;
-		}
-
-		std::string parsedStr = parseSomeString(str, read, malloc, enableJSON5);
-
-		char* strMem = (char*)malloc->allocate(parsedStr.length());
-		std::memcpy(strMem, parsedStr.c_str(), parsedStr.length());
-
-		return malloc->allocString(strMem, parsedStr.length());
-	}
-
-	JValue* parseJValue(const std::string& str, JMalloc*& malloc, bool enableJSON5 = JSON5_DISABLE)
-	{
-		JReadData read;
-
-		if (malloc == nullptr)
-		{
-			//The resulting data structure will likely be smaller than the string,
-			//so allocating that much memory is a good idea to ensure it all fits.
-			malloc = new JMalloc(str.length());
-		}
-
-		return parseJValue(str, read, malloc, enableJSON5);
-	}
+	};
 
 }
