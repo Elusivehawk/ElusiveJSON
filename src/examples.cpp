@@ -26,7 +26,7 @@ int main()
 	std::string jsonData = std::string(rawData);
 	JMalloc* malloc = new JMalloc(size);
 	
-	JReader reader(malloc, &jsonData);
+	JParser reader(malloc, &jsonData);
 	JObject* jobj = reader.parseJObject();
 
 	std::cout << jobj->toString(true) << std::endl;

@@ -418,7 +418,7 @@ namespace ElusiveJSON
 		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 	}
 
-	class JReader
+	class JParser
 	{
 	private:
 		JMalloc* const malloc;
@@ -426,14 +426,14 @@ namespace ElusiveJSON
 		uint64_t current = 0;
 		uint32_t line = 0;
 		uint32_t lineChar = 0;
-		bool enableJSON5 = false;
+		bool useJSON5 = false;
 
 	public:
-		JReader(JMalloc* mem, std::string* jsonText) : malloc(mem), text(jsonText){}
-
-		JReader* enableJSON5()
+		JParser(JMalloc* mem, std::string* jsonText) : malloc(mem), text(jsonText){}
+		
+		JParser* enableJSON5()
 		{
-			enableJSON5 = true;
+			useJSON5 = true;
 			return this;
 		}
 
@@ -455,23 +455,23 @@ namespace ElusiveJSON
 		{
 			while (true)
 			{
-				if (enableJSON5 && text[current] == '/')
+				if (useJSON5 && text->at(current) == '/')
 				{
 					//Comment skipping
-					if (text[current + 1] == '/')
+					if (text->at(current + 1) == '/')
 					{
 						next(2);
-						while (text[current] != '\n') { next(); }
+						while (text->at(current) != '\n') { next(); }
 						newline();
 
 					}
-					else if (text[current + 1] == '*')
+					else if (text->at(current + 1) == '*')
 					{
 						next(2);
 
-						while (text[current] != '*' && text[current + 1] != '/')
+						while (text->at(current) != '*' && text->at(current + 1) != '/')
 						{
-							if (text[current] == '\n')
+							if (text->at(current) == '\n')
 								newline();
 							else
 								next();
@@ -488,21 +488,19 @@ namespace ElusiveJSON
 
 				}
 
-				switch (text[current])
+				switch (text->at(current))
 				{
-				case '\n': newline(); continue;
-				case ' ':
-				case '\r':
-				case '\t': next(); continue;
-				default: break;
+					case '\n': newline(); continue;
+					case ' ':
+					case '\r':
+					case '\t': next(); continue;
+					default: break;
 				}
 
 				break;
 			}
 
 		}
-
-		JValue* parseJValue();
 
 		JBool* parseJBool()
 		{
@@ -535,15 +533,18 @@ namespace ElusiveJSON
 				sign = -1;
 			}
 
-			if (enableJSON5)
+			if (useJSON5)
 			{
-				if (text->at(current) == '∞')
+				auto sub = text->substr(current, 3);
+
+				//TODO use proper ∞ sign
+				if (sub == "Inf")
 				{
 					next();
 					return malloc->allocFloat(std::numeric_limits<float>::infinity() * sign);
 				}
 
-				if (text->substr(current, 3) == "NaN")
+				if (sub == "NaN")
 				{
 					next();
 					return malloc->allocFloat(NAN * sign);
@@ -553,7 +554,7 @@ namespace ElusiveJSON
 				{
 					isHex = true;
 					ss << std::hex;
-					ss << text[current] << text[current + 1];
+					ss << text->at(current) << text->at(current + 1);
 					next(2);
 					consumed += 2;
 
@@ -581,7 +582,7 @@ namespace ElusiveJSON
 						throw std::exception(buf);
 					}
 
-					if (!enableJSON5 && (consumed == 0 || !isInt(text[current + 1])))
+					if (!useJSON5 && (consumed == 0 || !isInt(text->at(current + 1))))
 					{
 						char buf[256];
 						sprintf_s(buf, 256, "Invalud char found in int at line %u:%u: \'%c\'", line, lineChar, c);
@@ -738,13 +739,13 @@ namespace ElusiveJSON
 		{
 			char delim = text->at(current);
 
-			if (delim == '\"' || (enableJSON5 && delim == '\''))
+			if (delim == '\"' || (useJSON5 && delim == '\''))
 			{
 				next();
 				return parseQuotedString(delim);
 			}
 
-			if (enableJSON5 && isASCIILetter(delim))
+			if (useJSON5 && isASCIILetter(delim))
 			{
 				return parseUnquotedString();
 			}
@@ -763,7 +764,7 @@ namespace ElusiveJSON
 			{
 				if (text->at(current) == ']')
 				{
-					if (!enableJSON5 && expectNextObj)
+					if (!useJSON5 && expectNextObj)
 					{
 						char buf[256];
 						sprintf_s(buf, 256, "Trailing comma found at line %u:%u", line, lineChar);
@@ -776,13 +777,13 @@ namespace ElusiveJSON
 
 				expectNextObj = false;
 
-				skipWhitespace(text, read, enableJSON5);
+				skipWhitespace();
 
-				JValue* val = parseJValue(text, read, malloc, enableJSON5);
+				JValue* val = parseJValue();
 
 				vals.push_back(val);
 
-				if (text[current] == ',')
+				if (text->at(current) == ',')
 				{
 					expectNextObj = true;
 					next();
@@ -803,6 +804,8 @@ namespace ElusiveJSON
 		}
 
 	public:
+		JValue* parseJValue();
+
 		JObject* parseJObject()
 		{
 			if (text->at(current) != '{')
@@ -823,7 +826,7 @@ namespace ElusiveJSON
 
 				if (text->at(current) == '}')
 				{
-					if (!enableJSON5 && expectNextObj)
+					if (!useJSON5 && expectNextObj)
 					{
 						char buf[256];
 						sprintf_s(buf, 256, "Trailing comma found at line %u:%u", line, lineChar);
@@ -850,7 +853,7 @@ namespace ElusiveJSON
 				if (text->at(current) != ':')
 				{
 					char buf[256];
-					sprintf_s(buf, 256, "Invalud value at %u:%u: \'%c\'", line, lineChar, text[current]);
+					sprintf_s(buf, 256, "Invalud value at %u:%u: \'%c\'", line, lineChar, text->at(current));
 					throw std::exception(buf);
 				}
 
@@ -873,46 +876,47 @@ namespace ElusiveJSON
 			return ret;
 		}
 
-		JValue* parseJValue()
+	};
+
+	JValue* JParser::parseJValue()
+	{
+		char startC = text->at(current);
+
+		if (isInt(startC) || startC == '-' || (useJSON5 && (startC == '.' || startC == '+')))
 		{
-			char startC = text->at(current);
-
-			if (isInt(startC) || startC == '-' || (enableJSON5 && (startC == '.' || startC == '+')))
-			{
-				return parseJIntOrFloat();
-			}
-
-			if (startC == '{')
-			{
-				return parseJObject();
-			}
-
-			if (startC == '[')
-			{
-				next();
-				return parseJArray();
-			}
-
-			if (startC == 't' || startC == 'f')
-			{
-				JBool* bVal = parseJBool();
-				if (bVal) return bVal;
-			}
-
-			//TODO figure out what to do with this, this looks terrible
-			if (startC == 'n' && text->substr(current, 4) == "null")
-			{
-				return nullptr;
-			}
-
-			std::string parsedStr = parseSomeString();
-
-			char* strMem = (char*)malloc->allocate(parsedStr.length());
-			std::memcpy(strMem, parsedStr.c_str(), parsedStr.length());
-
-			return malloc->allocString(strMem, parsedStr.length());
+			return parseJIntOrFloat();
 		}
 
-	};
+		if (startC == '{')
+		{
+			return parseJObject();
+		}
+
+		if (startC == '[')
+		{
+			next();
+			return parseJArray();
+		}
+
+		if (startC == 't' || startC == 'f')
+		{
+			JBool* bVal = parseJBool();
+			if (bVal) return bVal;
+		}
+
+		//TODO figure out what to do with this, this looks terrible
+		if (startC == 'n' && text->substr(current, 4) == "null")
+		{
+			return nullptr;
+		}
+
+		std::string parsedStr = parseSomeString();
+
+		char* strMem = (char*)malloc->allocate(parsedStr.length());
+		std::memcpy(strMem, parsedStr.c_str(), parsedStr.length());
+
+		return malloc->allocString(strMem, parsedStr.length());
+	}
+
 
 }
