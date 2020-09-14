@@ -27,8 +27,22 @@ int main()
 	JMalloc* malloc = new JMalloc(size);
 	
 	JParser reader(malloc, &jsonData);
-	JObject* jobj = reader.parseJObject();
+	JObject* jobj = nullptr;
 
-	std::cout << jobj->toString(true) << std::endl;
+	try
+	{
+		jobj = reader.parseJObject();
 
+	}
+	catch (std::exception& e)
+	{
+		std::cout << e.what() << std::endl;
+	}
+
+	if (jobj)
+	{
+		std::cout << jobj->toString(true) << std::endl;
+
+	}
+	
 }

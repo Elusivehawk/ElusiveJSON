@@ -25,29 +25,6 @@ namespace ElusiveJSON
 
 #define NOT_IMPL_YET {throw new NoImplError();}
 
-	//FOR INTERNAL USE ONLY
-	//PLEASE DO NOT USE
-	struct JReadData
-	{
-		uint64_t current = 0;
-		uint32_t line = 0;
-		uint32_t lineChar = 0;
-		
-		void next(uint32_t incr = 1)
-		{
-			current += incr;
-			lineChar += incr;
-		}
-
-		void newline()
-		{
-			++current;
-			++line;
-			lineChar = 0;
-		}
-
-	};
-
 	class JValue
 	{
 	public:
@@ -424,8 +401,8 @@ namespace ElusiveJSON
 		JMalloc* const malloc;
 		std::string* text;
 		uint64_t current = 0;
-		uint32_t line = 0;
-		uint32_t lineChar = 0;
+		uint32_t line = 1;
+		uint32_t lineChar = 1;
 		bool useJSON5 = false;
 
 	public:
@@ -448,7 +425,7 @@ namespace ElusiveJSON
 		{
 			++current;
 			++line;
-			lineChar = 0;
+			lineChar = 1;
 		}
 
 		void skipWhitespace()
@@ -483,7 +460,7 @@ namespace ElusiveJSON
 					else
 					{
 						//FIXME
-						throw std::exception("Invalud syntax");
+						throw std::exception("Invalid syntax");
 					}
 
 				}
@@ -578,14 +555,14 @@ namespace ElusiveJSON
 					if (isHex || isFloat || hasExponent)
 					{
 						char buf[256];
-						sprintf_s(buf, 256, "Invalud char found in int at %u:%u: \'%c\'", line, lineChar, c);
+						sprintf_s(buf, 256, "Invalid char found in int at %u:%u: \'%c\'", line, lineChar, c);
 						throw std::exception(buf);
 					}
 
 					if (!useJSON5 && (consumed == 0 || !isInt(text->at(current + 1))))
 					{
 						char buf[256];
-						sprintf_s(buf, 256, "Invalud char found in int at line %u:%u: \'%c\'", line, lineChar, c);
+						sprintf_s(buf, 256, "Invalid char found in int at line %u:%u: \'%c\'", line, lineChar, c);
 						throw std::exception(buf);
 					}
 
@@ -607,7 +584,7 @@ namespace ElusiveJSON
 					if (expSign != '-' && expSign != '+' && !isInt(c))//Apparently signage is optional
 					{
 						char buf[256];
-						sprintf_s(buf, 256, "Invalud exponent signage in int at line %u:%u: \'%c\'", line, lineChar, c);
+						sprintf_s(buf, 256, "Invalid exponent signage in int at line %u:%u: \'%c\'", line, lineChar, c);
 						throw std::exception(buf);
 					}
 
@@ -683,17 +660,28 @@ namespace ElusiveJSON
 				if (!valid)
 				{
 					char buf[256];
-					sprintf_s(buf, 256, "Invalud value at line %u:%u: \'%c\'", line, lineChar, c);
+					sprintf_s(buf, 256, "Invalid value at line %u:%u: \'%c\'", line, lineChar, c);
 					throw std::exception(buf);
 				}
 
 			}
-
+			
 			return c;
 		}
 
-		std::string parseQuotedString(char delim)
+		std::string parseString()
 		{
+			char delim = text->at(current);
+
+			if (delim != '\"' && (!useJSON5 || delim != '\''))
+			{
+				char buf[256];
+				sprintf_s(buf, 256, "Invalid string literal at line %u:%u: \'%c\'", line, lineChar, delim);
+				throw std::exception(buf);
+			}
+
+			next();
+
 			std::stringstream ss;
 
 			while (true)
@@ -707,52 +695,56 @@ namespace ElusiveJSON
 				}
 
 				ss << getEscapedChar(c);
-				next();
 
-			}
-
-			return ss.str();
-		}
-
-		std::string parseUnquotedString()
-		{
-			std::stringstream ss;
-
-			while (true)
-			{
-				char c = text->at(current);
-				
-				if (!isASCIILetter(c))
+				if (c == '\n')
 				{
-					break;
+					if (!useJSON5)
+					{
+						throw std::exception("Newlines not allowed in strings");
+					}
+
+					newline();
+
+				}
+				else
+				{
+					next();
 				}
 
-				ss << getEscapedChar(c);
-				next();
-
 			}
 
 			return ss.str();
 		}
 
-		std::string parseSomeString()
+		std::string parseUnquotedKey()
 		{
-			char delim = text->at(current);
+			uint64_t start = current;
+			uint64_t count = 0;
 
-			if (delim == '\"' || (useJSON5 && delim == '\''))
+			while (isASCIILetter(text->at(current)))
 			{
 				next();
-				return parseQuotedString(delim);
+				++count;
 			}
 
-			if (useJSON5 && isASCIILetter(delim))
+			if (count == 0)
 			{
-				return parseUnquotedString();
+				char buf[256];
+				sprintf_s(buf, 256, "Invalid key value at line %u:%u: \'%c\'", line, lineChar, text->at(current));
+				throw std::exception(buf);
 			}
 
-			char buf[256];
-			sprintf_s(buf, 256, "Invalud string literal at line %u:%u: \'%c\'", line, lineChar, delim);
-			throw std::exception(buf);
+			return text->substr(start, count);
+		}
+
+		std::string parseKey()
+		{
+			if (useJSON5 && isASCIILetter(text->at(current)))
+			{
+				return parseUnquotedKey();
+			}
+
+			return parseString();
 		}
 
 		JArray* parseJArray()
@@ -818,42 +810,42 @@ namespace ElusiveJSON
 			next();
 
 			JObject* ret = malloc->allocObject();
-			bool expectNextObj = false;
-
+			bool expectNextPair = true;
+			bool trailingComma = false;
+			
 			while (true)
 			{
 				skipWhitespace();
 
 				if (text->at(current) == '}')
 				{
-					if (!useJSON5 && expectNextObj)
+					if (!useJSON5 && trailingComma)
 					{
 						char buf[256];
-						sprintf_s(buf, 256, "Trailing comma found at line %u:%u", line, lineChar);
+						sprintf_s(buf, 256, "Trailing comma found before line %u:%u", line, lineChar);
 						throw std::exception(buf);
 					}
 
 					next();
 					break;
 				}
-
-				if (text->at(current) == ',')
+				else if (!expectNextPair)
 				{
 					char buf[256];
-					sprintf_s(buf, 256, "Erroneous comma found at line %u:%u'", line, lineChar);
+					sprintf_s(buf, 256, "Malformed object at line %u:%u'", line, lineChar);
 					throw std::exception(buf);
 				}
 
-				expectNextObj = false;
+				trailingComma = false;
 
-				std::string key = parseSomeString();
+				std::string key = parseKey();
 
 				skipWhitespace();
 
 				if (text->at(current) != ':')
 				{
 					char buf[256];
-					sprintf_s(buf, 256, "Invalud value at %u:%u: \'%c\'", line, lineChar, text->at(current));
+					sprintf_s(buf, 256, "Invalid value at %u:%u: \'%c\', was expecting \':\'", line, lineChar, text->at(current));
 					throw std::exception(buf);
 				}
 
@@ -867,8 +859,16 @@ namespace ElusiveJSON
 
 				if (text->at(current) == ',')
 				{
-					expectNextObj = true;
+					expectNextPair = true;
+					trailingComma = true;
 					next();
+
+				}
+				else
+				{
+					expectNextPair = false;
+					trailingComma = false;
+
 				}
 
 			}
@@ -910,7 +910,7 @@ namespace ElusiveJSON
 			return nullptr;
 		}
 
-		std::string parsedStr = parseSomeString();
+		std::string parsedStr = parseString();
 
 		char* strMem = (char*)malloc->allocate(parsedStr.length());
 		std::memcpy(strMem, parsedStr.c_str(), parsedStr.length());
