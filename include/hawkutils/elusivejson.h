@@ -23,21 +23,28 @@ namespace ElusiveJSON
 		NoImplError() : std::logic_error("Method or function not yet implemented") {}
 	};
 
-#define NOT_IMPL_YET {throw new NoImplError();}
+#define ELUSIVEJSON_NOT_IMPL_YET {throw new NoImplError();}
+
+	//Core API
 
 	class JValue
 	{
 	public:
-		virtual bool boolValue() NOT_IMPL_YET;
-		virtual int intValue() NOT_IMPL_YET;
-		virtual float floatValue() NOT_IMPL_YET;
-		virtual std::string strValue() NOT_IMPL_YET;
-		virtual JValue* getValue(std::string name) NOT_IMPL_YET;
-		virtual void setValue(std::string name, JValue* value) NOT_IMPL_YET;
-		virtual size_t length() NOT_IMPL_YET;
-		virtual JValue* getValue(uint32_t index) NOT_IMPL_YET;
-		virtual void setValue(uint32_t index, JValue* value) NOT_IMPL_YET;
-		virtual std::string toString(bool pretty = false, int scope = 0) NOT_IMPL_YET;
+		//Primitive/basic type getters
+		virtual bool boolValue() ELUSIVEJSON_NOT_IMPL_YET;
+		virtual int intValue() ELUSIVEJSON_NOT_IMPL_YET;
+		virtual float floatValue() ELUSIVEJSON_NOT_IMPL_YET;
+		virtual std::string charValue() ELUSIVEJSON_NOT_IMPL_YET;
+		//Object getters/setters
+		virtual bool hasValue(std::string key) ELUSIVEJSON_NOT_IMPL_YET;
+		virtual JValue* getValue(std::string key) ELUSIVEJSON_NOT_IMPL_YET;
+		virtual void setValue(std::string key, JValue* value) ELUSIVEJSON_NOT_IMPL_YET;
+		//Array gettes/setters
+		virtual size_t length() ELUSIVEJSON_NOT_IMPL_YET;
+		virtual JValue* getValue(uint32_t index) ELUSIVEJSON_NOT_IMPL_YET;
+		virtual void setValue(uint32_t index, JValue* value) ELUSIVEJSON_NOT_IMPL_YET;
+		//Method to print back to JSON
+		virtual std::string toString(bool pretty = false, int scope = 0) ELUSIVEJSON_NOT_IMPL_YET;
 
 	};
 
@@ -55,11 +62,7 @@ namespace ElusiveJSON
 
 		std::string toString(bool pretty = false, int scope = 0)
 		{
-			std::stringstream ss;
-
-			ss << value;
-
-			return ss.str();
+			return value ? "true" : "false";
 		}
 
 	};
@@ -78,11 +81,7 @@ namespace ElusiveJSON
 
 		std::string toString(bool pretty = false, int scope = 0)
 		{
-			std::stringstream ss;
-
-			ss << value;
-
-			return ss.str();
+			return (std::stringstream() << value).str();
 		}
 		
 	};
@@ -101,11 +100,7 @@ namespace ElusiveJSON
 
 		std::string toString(bool pretty = false, int scope = 0)
 		{
-			std::stringstream ss;
-
-			ss << value;
-
-			return ss.str();
+			return (std::stringstream() << value).str();
 		}
 
 	};
@@ -118,20 +113,14 @@ namespace ElusiveJSON
 	public:
 		JString(const char* text, size_t len) : string(text), length(len){}
 
-		std::string strValue()
+		std::string charValue()
 		{
 			return std::string(string, length);
 		}
 
 		std::string toString(bool pretty = false, int scope = 0)
 		{
-			std::stringstream ss;
-			
-			ss << '\"';
-			ss << strValue();
-			ss << '\"';
-
-			return ss.str();
+			return (std::stringstream() << '\"' << charValue() << '\"').str();
 		}
 
 	};
@@ -142,6 +131,11 @@ namespace ElusiveJSON
 		std::unordered_map<std::string, JValue*> values = {};
 	public:
 		JObject(){}
+
+		bool hasValue(std::string key)
+		{
+			return values.find(key) != values.end();
+		}
 
 		JValue* getValue(std::string name)
 		{
@@ -197,17 +191,8 @@ namespace ElusiveJSON
 				ss << pair.first;
 				ss << "\": ";
 
-				if (pair.second)
-				{
-					ss << pair.second->toString(pretty, scope + 1);
+				ss << pair.second ? pair.second->toString(pretty, scope + 1) : "null";
 
-				}
-				else
-				{
-					ss << "null";
-
-				}
-				
 				++i;
 
 			}
@@ -238,6 +223,11 @@ namespace ElusiveJSON
 		size_t length;
 	public:
 		JArray(JValue** vs, size_t len) : values(vs), length(len){}
+
+		size_t length()
+		{
+			return length;
+		}
 
 		JValue* getValue(uint32_t index)
 		{
@@ -284,6 +274,7 @@ namespace ElusiveJSON
 
 	};
 
+	//Custom linear allocator
 	class JMalloc
 	{
 	private:
@@ -372,13 +363,18 @@ namespace ElusiveJSON
 		JBool* allocBool(bool v) { return new(allocate(1)) JBool(v); }
 		JInt* allocInt(int v) { return new(allocate(4, 4)) JInt(v); }
 		JFloat* allocFloat(float v) { return new(allocate(4, 4)) JFloat(v); }
-		JString* allocString(const char* text, size_t length) { return new(allocate(sizeof(JString), 8)) JString(text, length); }
 		JArray* allocArray(JValue** arr, size_t length) { return new(allocate(sizeof(JArray), 8)) JArray(arr, length); }
 		JObject* allocObject() { return new(allocate(sizeof(JObject), 8)) JObject(); }
 
-	};
+		JString* allocString(std::string* str)
+		{
+			char* strMem = (char*)allocate(str->length());
+			std::memcpy(strMem, str->c_str(), str->length());
 
-	//Core API
+			return new(allocate(sizeof(JString), 8)) JString(strMem, str->length());
+		}
+
+	};
 
 	bool isInt(char c)
 	{
@@ -548,7 +544,7 @@ namespace ElusiveJSON
 					ss << c;
 					next();
 					++consumed;
-					continue;
+
 				}
 				else if (c == '.')
 				{
@@ -570,10 +566,17 @@ namespace ElusiveJSON
 					ss << c;
 					next();
 					++consumed;
-					continue;
+
 				}
 				else if (c == 'e' || c == 'E')
 				{
+					if (hasExponent)
+					{
+						char buf[256];
+						sprintf_s(buf, 256, "Duplicate exponent in int at line %u:%u", line, lineChar);
+						throw std::exception(buf);
+					}
+
 					hasExponent = true;
 					ss << c;
 					next();
@@ -591,11 +594,14 @@ namespace ElusiveJSON
 					ss << c;
 					next();
 					++consumed;
-					continue;
+
+				}
+				else
+				{
+					//Don't need to have any consequences for an invalid int (i.e. 400j) because after this, it will probably check for a comma. It won't find the comma, and complain.
+					break;
 				}
 
-				//Don't need to have any consequences for an invalid int (i.e. 400j) because after this, it will probably check for a comma. It won't find the comma, and complain.
-				break;
 			}
 
 			if (isFloat)
@@ -669,7 +675,7 @@ namespace ElusiveJSON
 			return c;
 		}
 
-		std::string parseString()
+		void parseString(std::string& str)
 		{
 			char delim = text->at(current);
 
@@ -684,16 +690,10 @@ namespace ElusiveJSON
 
 			std::stringstream ss;
 
-			while (true)
-			{
-				char c = text->at(current);
-				
-				if (c == delim)
-				{
-					next();
-					break;
-				}
+			char c;
 
+			while ((c = text->at(current)) != delim)
+			{
 				ss << getEscapedChar(c);
 
 				if (c == '\n')
@@ -713,10 +713,13 @@ namespace ElusiveJSON
 
 			}
 
-			return ss.str();
+			next();
+
+			str = ss.str();
+
 		}
 
-		std::string parseUnquotedKey()
+		void parseUnquotedKey(std::string str)
 		{
 			uint64_t start = current;
 			uint64_t count = 0;
@@ -734,17 +737,21 @@ namespace ElusiveJSON
 				throw std::exception(buf);
 			}
 
-			return text->substr(start, count);
+			str = text->substr(start, count);
+
 		}
 
-		std::string parseKey()
+		void parseKey(std::string& str)
 		{
 			if (useJSON5 && isASCIILetter(text->at(current)))
 			{
-				return parseUnquotedKey();
+				parseUnquotedKey(str);
+			}
+			else
+			{
+				parseString(str);
 			}
 
-			return parseString();
 		}
 
 		JArray* parseJArray()
@@ -838,7 +845,8 @@ namespace ElusiveJSON
 
 				trailingComma = false;
 
-				std::string key = parseKey();
+				std::string key;
+				parseKey(key);
 
 				skipWhitespace();
 
@@ -856,6 +864,8 @@ namespace ElusiveJSON
 				JValue* val = parseJValue();
 
 				ret->setValue(key, val);
+
+				skipWhitespace();
 
 				if (text->at(current) == ',')
 				{
@@ -910,13 +920,10 @@ namespace ElusiveJSON
 			return nullptr;
 		}
 
-		std::string parsedStr = parseString();
+		std::string parsedStr;
+		parseString(parsedStr);
 
-		char* strMem = (char*)malloc->allocate(parsedStr.length());
-		std::memcpy(strMem, parsedStr.c_str(), parsedStr.length());
-
-		return malloc->allocString(strMem, parsedStr.length());
+		return malloc->allocString(&parsedStr);
 	}
-
 
 }
