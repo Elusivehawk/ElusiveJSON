@@ -17,34 +17,33 @@ Add support for wide chars, wide strings, etc.
 
 namespace ElusiveJSON
 {
-	class NoImplError : public std::logic_error
-	{
-	public:
-		NoImplError() : std::logic_error("Method or function not yet implemented") {}
-	};
-
-#define ELUSIVEJSON_NOT_IMPL_YET {throw new NoImplError();}
-
 	//Core API
+
+	enum class JType
+	{
+		INT, FLOAT, BOOL, STRING, ARRAY, OBJECT
+	};
 
 	class JValue
 	{
 	public:
+		//Type getter
+		virtual const JType type() = 0;
 		//Primitive/basic type getters
-		virtual bool boolValue() ELUSIVEJSON_NOT_IMPL_YET;
-		virtual int intValue() ELUSIVEJSON_NOT_IMPL_YET;
-		virtual float floatValue() ELUSIVEJSON_NOT_IMPL_YET;
-		virtual std::string charValue() ELUSIVEJSON_NOT_IMPL_YET;
+		virtual bool boolValue() { return false; };
+		virtual int intValue() { return 0; };
+		virtual float floatValue() { return 0.0f; };
+		virtual std::string charValue() { return ""; };
 		//Object getters/setters
-		virtual bool hasValue(std::string key) ELUSIVEJSON_NOT_IMPL_YET;
-		virtual JValue* getValue(std::string key) ELUSIVEJSON_NOT_IMPL_YET;
-		virtual void setValue(std::string key, JValue* value) ELUSIVEJSON_NOT_IMPL_YET;
+		virtual bool hasValue(std::string key) { return false; };
+		virtual JValue* getValue(std::string key) { return nullptr; };
+		virtual void setValue(std::string key, JValue* value) {};
 		//Array gettes/setters
-		virtual size_t arrayLength() ELUSIVEJSON_NOT_IMPL_YET;
-		virtual JValue* getValue(uint32_t index) ELUSIVEJSON_NOT_IMPL_YET;
-		virtual void setValue(uint32_t index, JValue* value) ELUSIVEJSON_NOT_IMPL_YET;
+		virtual size_t arrayLength() { return 0; };
+		virtual JValue* getValue(uint32_t index) { return nullptr; };
+		virtual void setValue(uint32_t index, JValue* value) {};
 		//Method to print back to JSON
-		virtual std::string toString(bool pretty = false, int scope = 0) ELUSIVEJSON_NOT_IMPL_YET;
+		virtual std::string toString(bool pretty = false, int scope = 0) = 0;
 
 	};
 
@@ -54,6 +53,8 @@ namespace ElusiveJSON
 		bool value;
 	public:
 		JBool(bool b) : value(b) {}
+
+		const JType type() { return JType::BOOL; }
 
 		bool boolValue()
 		{
@@ -74,6 +75,8 @@ namespace ElusiveJSON
 	public:
 		JInt(int i) : value(i) {}
 
+		const JType type() { return JType::INT; }
+
 		int intValue()
 		{
 			return value;
@@ -92,6 +95,8 @@ namespace ElusiveJSON
 		float value;
 	public:
 		JFloat(float f) : value(f) {}
+
+		const JType type() { return JType::FLOAT; }
 
 		float floatValue()
 		{
@@ -113,6 +118,8 @@ namespace ElusiveJSON
 	public:
 		JString(const char* text, size_t len) : string(text), length(len){}
 
+		const JType type() { return JType::STRING; }
+
 		std::string charValue()
 		{
 			return std::string(string, length);
@@ -130,7 +137,9 @@ namespace ElusiveJSON
 	private:
 		std::unordered_map<std::string, JValue*> map = {};
 	public:
-		JObject(){}
+		JObject() {}
+
+		const JType type() { return JType::OBJECT; }
 
 		bool hasValue(std::string key)
 		{
@@ -211,7 +220,7 @@ namespace ElusiveJSON
 
 			}
 
-			ss << "}";
+			ss << '}';
 
 			return ss.str();
 		}
@@ -225,6 +234,8 @@ namespace ElusiveJSON
 		size_t length;
 	public:
 		JArray(JValue** vs, size_t len) : array(vs), length(len){}
+
+		const JType type() { return JType::ARRAY; }
 
 		size_t arrayLength()
 		{
@@ -256,16 +267,7 @@ namespace ElusiveJSON
 
 				JValue* val = array[i];
 
-				if (val)
-				{
-					ss << val->toString(pretty, scope + 1);
-
-				}
-				else
-				{
-					ss << "null";
-
-				}
+				ss << (val ? val->toString(pretty, scope + 1) : "null");
 
 			}
 

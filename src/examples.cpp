@@ -27,11 +27,11 @@ int main()
 	JMalloc* malloc = new JMalloc(size);
 	
 	JParser reader(malloc, &jsonData);
-	JObject* jobj = nullptr;
+	JValue* jobj = nullptr;
 
 	try
 	{
-		jobj = reader.parseJObject();
+		jobj = reader.parseJValue();
 
 	}
 	catch (std::exception& e)
