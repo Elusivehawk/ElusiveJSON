@@ -192,7 +192,8 @@ namespace ElusiveJSON
 				ss << pair.first;
 				ss << "\": ";
 
-				ss << pair.second ? pair.second->toString(pretty, scope + 1) : "null";
+				//DO NOT UNWRAP THIS TERNARY OPERATOR!!
+				ss << (pair.second ? pair.second->toString(pretty, scope + 1) : "null");
 
 				++i;
 
