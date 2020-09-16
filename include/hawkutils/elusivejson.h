@@ -40,7 +40,7 @@ namespace ElusiveJSON
 		virtual JValue* getValue(std::string key) ELUSIVEJSON_NOT_IMPL_YET;
 		virtual void setValue(std::string key, JValue* value) ELUSIVEJSON_NOT_IMPL_YET;
 		//Array gettes/setters
-		virtual size_t length() ELUSIVEJSON_NOT_IMPL_YET;
+		virtual size_t arrayLength() ELUSIVEJSON_NOT_IMPL_YET;
 		virtual JValue* getValue(uint32_t index) ELUSIVEJSON_NOT_IMPL_YET;
 		virtual void setValue(uint32_t index, JValue* value) ELUSIVEJSON_NOT_IMPL_YET;
 		//Method to print back to JSON
@@ -128,26 +128,27 @@ namespace ElusiveJSON
 	class JObject : public JValue
 	{
 	private:
-		std::unordered_map<std::string, JValue*> values = {};
+		std::unordered_map<std::string, JValue*> map = {};
 	public:
 		JObject(){}
 
 		bool hasValue(std::string key)
 		{
-			return values.find(key) != values.end();
+			return map.find(key) != map.end();
 		}
 
-		JValue* getValue(std::string name)
+		JValue* getValue(std::string key)
 		{
-			return values.at(name);
+			auto val = map.find(key);
+			return val != map.end() ? val->second : nullptr;
 		}
 
-		void setValue(std::string name, JValue* value)
+		void setValue(std::string key, JValue* value)
 		{
-			values.insert_or_assign(name, value);
+			map.insert_or_assign(key, value);
 		}
 
-		std::string toString(bool pretty = false, int scope = 0)
+		std::string toString(bool pretty = false, int scope = 1)
 		{
 			std::stringstream ss;
 
@@ -167,7 +168,7 @@ namespace ElusiveJSON
 
 			int i = 0;
 
-			for (auto pair : values)
+			for (auto pair : map)
 			{
 				if (i > 0)
 				{
@@ -201,7 +202,7 @@ namespace ElusiveJSON
 			{
 				ss << '\n';
 
-				for (int s = 0; s < scope; ++s)
+				for (int s = 0; s < scope - 1; ++s)
 				{
 					ss << '\t';
 
@@ -219,24 +220,24 @@ namespace ElusiveJSON
 	class JArray : public JValue
 	{
 	private:
-		JValue** values;
+		JValue** array;
 		size_t length;
 	public:
-		JArray(JValue** vs, size_t len) : values(vs), length(len){}
+		JArray(JValue** vs, size_t len) : array(vs), length(len){}
 
-		size_t length()
+		size_t arrayLength()
 		{
 			return length;
 		}
 
 		JValue* getValue(uint32_t index)
 		{
-			return values[index];
+			return array[index];
 		}
 
 		void setValue(uint32_t index, JValue* value)
 		{
-			values[index] = value;
+			array[index] = value;
 		}
 
 		std::string toString(bool pretty = false, int scope = 0)
@@ -252,11 +253,11 @@ namespace ElusiveJSON
 					ss << ',';
 				}
 
-				JValue* val = values[i];
+				JValue* val = array[i];
 
 				if (val)
 				{
-					ss << val->toString();
+					ss << val->toString(pretty, scope + 1);
 
 				}
 				else
