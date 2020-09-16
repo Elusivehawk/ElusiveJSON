@@ -212,7 +212,7 @@ namespace ElusiveJSON
 			{
 				ss << '\n';
 
-				for (int s = 0; s < scope - 1; ++s)
+				for (int s = 0; s < scope; ++s)
 				{
 					ss << '\t';
 
