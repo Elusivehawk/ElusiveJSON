@@ -853,7 +853,7 @@ namespace ElusiveJSON
 				if (!expectNextPair)
 				{
 					char buf[256];
-					sprintf_s(buf, 256, "Malformed object at line %u:%u'", line, lineChar);
+					sprintf_s(buf, 256, "Malformed object at line %u:%u", line, lineChar);
 					throw std::exception(buf);
 				}
 
@@ -930,6 +930,7 @@ namespace ElusiveJSON
 		//TODO figure out what to do with this, this looks terrible
 		if (startC == 'n' && text->substr(current, 4) == "null")
 		{
+			next(4);
 			return nullptr;
 		}
 
