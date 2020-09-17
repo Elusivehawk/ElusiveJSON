@@ -43,7 +43,7 @@ namespace ElusiveJSON
 		virtual JValue* getValue(uint32_t index) { return nullptr; };
 		virtual void setValue(uint32_t index, JValue* value) {};
 		//Method to print back to JSON
-		virtual std::string toString(bool pretty = false, int scope = 0) = 0;
+		virtual std::string toString(bool pretty = false, int scope = 1) = 0;
 
 	};
 
@@ -61,7 +61,7 @@ namespace ElusiveJSON
 			return value;
 		}
 
-		std::string toString(bool pretty = false, int scope = 0)
+		std::string toString(bool pretty = false, int scope = 1)
 		{
 			return value ? "true" : "false";
 		}
@@ -82,7 +82,7 @@ namespace ElusiveJSON
 			return value;
 		}
 
-		std::string toString(bool pretty = false, int scope = 0)
+		std::string toString(bool pretty = false, int scope = 1)
 		{
 			return (std::stringstream() << value).str();
 		}
@@ -103,7 +103,7 @@ namespace ElusiveJSON
 			return value;
 		}
 
-		std::string toString(bool pretty = false, int scope = 0)
+		std::string toString(bool pretty = false, int scope = 1)
 		{
 			return (std::stringstream() << value).str();
 		}
@@ -125,7 +125,7 @@ namespace ElusiveJSON
 			return std::string(string, length);
 		}
 
-		std::string toString(bool pretty = false, int scope = 0)
+		std::string toString(bool pretty = false, int scope = 1)
 		{
 			return (std::stringstream() << '\"' << charValue() << '\"').str();
 		}
@@ -212,7 +212,7 @@ namespace ElusiveJSON
 			{
 				ss << '\n';
 
-				for (int s = 0; s < scope; ++s)
+				for (int s = 0; s < scope - 1; ++s)
 				{
 					ss << '\t';
 
@@ -252,7 +252,7 @@ namespace ElusiveJSON
 			array[index] = value;
 		}
 
-		std::string toString(bool pretty = false, int scope = 0)
+		std::string toString(bool pretty = false, int scope = 1)
 		{
 			std::stringstream ss;
 
@@ -288,7 +288,7 @@ namespace ElusiveJSON
 		JMalloc* next = nullptr;
 
 	public:
-		JMalloc(size_t expected) : length(expected), data(new char[expected]) {}
+		JMalloc(size_t expected) : length(expected), data(new char[expected] {0}) {}
 
 		JMalloc() : JMalloc(4096) {}
 
@@ -364,11 +364,11 @@ namespace ElusiveJSON
 
 		}
 
-		JBool* allocBool(bool v) { return new(allocate(1)) JBool(v); }
-		JInt* allocInt(int v) { return new(allocate(4, 4)) JInt(v); }
-		JFloat* allocFloat(float v) { return new(allocate(4, 4)) JFloat(v); }
-		JArray* allocArray(JValue** arr, size_t length) { return new(allocate(sizeof(JArray), 8)) JArray(arr, length); }
-		JObject* allocObject() { return new(allocate(sizeof(JObject), 8)) JObject(); }
+		JBool* allocBool(bool v) { return new(allocate(16, 16)) JBool(v); }
+		JInt* allocInt(int v) { return new(allocate(16, 16)) JInt(v); }
+		JFloat* allocFloat(float v) { return new(allocate(16, 16)) JFloat(v); }
+		JArray* allocArray(JValue** arr, size_t length) { return new(allocate(sizeof(JArray), 16)) JArray(arr, length); }
+		JObject* allocObject() { return new(allocate(sizeof(JObject), 16)) JObject(); }
 
 		JString* allocString(std::string* str)
 		{
@@ -761,13 +761,15 @@ namespace ElusiveJSON
 		JArray* parseJArray()
 		{
 			std::vector<JValue*> vals;
-			bool expectNextObj = false;
+			bool expectNextObj = true;
 
 			while (true)
 			{
+				skipWhitespace();
+
 				if (text->at(current) == ']')
 				{
-					if (!useJSON5 && expectNextObj)
+					if (!useJSON5 && expectNextObj && !vals.empty())
 					{
 						char buf[256];
 						sprintf_s(buf, 256, "Trailing comma found at line %u:%u", line, lineChar);
@@ -777,29 +779,36 @@ namespace ElusiveJSON
 					next();
 					break;
 				}
+				
+				if (!expectNextObj)
+				{
+					char buf[256];
+					sprintf_s(buf, 256, "Malformed array at line %u:%u", line, lineChar);
+					throw std::exception(buf);
+				}
 
-				expectNextObj = false;
+				vals.push_back(parseJValue());
 
 				skipWhitespace();
-
-				JValue* val = parseJValue();
-
-				vals.push_back(val);
 
 				if (text->at(current) == ',')
 				{
 					expectNextObj = true;
 					next();
+				}
+				else
+				{
+					expectNextObj = false;
 
 				}
-
+				
 			}
 
 			JValue** array = (JValue**)malloc->allocate(vals.size() * sizeof(void*), sizeof(void*));
 
 			for (uint32_t i = 0; i < vals.size(); ++i)
 			{
-				array[i] = vals.at(i);
+				array[i] = (JValue*)vals.at(i);
 
 			}
 
@@ -840,7 +849,8 @@ namespace ElusiveJSON
 					next();
 					break;
 				}
-				else if (!expectNextPair)
+				
+				if (!expectNextPair)
 				{
 					char buf[256];
 					sprintf_s(buf, 256, "Malformed object at line %u:%u'", line, lineChar);
@@ -866,7 +876,6 @@ namespace ElusiveJSON
 				skipWhitespace();
 
 				JValue* val = parseJValue();
-
 				ret->setValue(key, val);
 
 				skipWhitespace();

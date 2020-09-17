@@ -33,16 +33,16 @@ int main()
 	{
 		jobj = reader.parseJValue();
 
+		if (jobj)
+		{
+			std::cout << jobj->toString(true) << std::endl;
+
+		}
+
 	}
 	catch (std::exception& e)
 	{
 		std::cout << e.what() << std::endl;
 	}
 
-	if (jobj)
-	{
-		std::cout << jobj->toString(true) << std::endl;
-
-	}
-	
 }
