@@ -723,7 +723,7 @@ namespace ElusiveJSON
 
 		}
 
-		void parseUnquotedKey(std::string str)
+		void parseUnquotedKey(std::string& str)
 		{
 			uint64_t start = current;
 			uint64_t count = 0;
