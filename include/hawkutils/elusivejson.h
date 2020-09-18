@@ -434,6 +434,11 @@ namespace ElusiveJSON
 			lineChar = 1;
 		}
 
+		bool isDelim(char c)
+		{
+			return c == '\"' || (useJSON5 && c == '\'');
+		}
+
 		void skipWhitespace()
 		{
 			while (true)
@@ -685,19 +690,8 @@ namespace ElusiveJSON
 			return c;
 		}
 
-		void parseString(std::string& str)
+		void parseString(std::string& str, char delim)
 		{
-			char delim = text->at(current);
-
-			if (delim != '\"' && (!useJSON5 || delim != '\''))
-			{
-				char buf[256];
-				sprintf_s(buf, 256, "Invalid string literal at line %u:%u: \'%c\'", line, lineChar, delim);
-				throw std::exception(buf);
-			}
-
-			next();
-
 			std::stringstream ss;
 
 			char c;
@@ -753,15 +747,23 @@ namespace ElusiveJSON
 
 		void parseKey(std::string& str)
 		{
-			if (useJSON5 && isASCIILetter(text->at(current)))
+			char c = text->at(current);
+			
+			if (c == '\"' || (useJSON5 && c == '\''))
+			{
+				next();
+				parseString(str, c);
+			}
+			else if (useJSON5 && isASCIILetter(c))
 			{
 				parseUnquotedKey(str);
 			}
 			else
 			{
-				parseString(str);
+				char buf[256];
+				sprintf_s(buf, 256, "Invalid key at line %u:%u (found \'%c\') ", line, lineChar, c);
+				throw std::exception(buf);
 			}
-
 		}
 
 		JArray* parseJArray()
@@ -909,41 +911,49 @@ namespace ElusiveJSON
 
 	JValue* JParser::parseJValue()
 	{
-		char startC = text->at(current);
+		char c = text->at(current);
 
-		if (isInt(startC) || startC == '-' || (useJSON5 && (startC == '.' || startC == '+')))
-		{
-			return parseJIntOrFloat();
-		}
-
-		if (startC == '{')
+		if (c == '{')
 		{
 			return parseJObject();
 		}
 
-		if (startC == '[')
+		if (c == '[')
 		{
 			next();
 			return parseJArray();
 		}
 
-		if (startC == 't' || startC == 'f')
+		if (isDelim(c))
+		{
+			next();
+			std::string parsedStr;
+			parseString(parsedStr, c);
+
+			return malloc->allocString(&parsedStr);
+		}
+
+		if (isInt(c) || c == '-' || (useJSON5 && (c == '.' || c == '+')))
+		{
+			return parseJIntOrFloat();
+		}
+
+		if (c == 't' || c == 'f')
 		{
 			JBool* bVal = parseJBool();
 			if (bVal) return bVal;
 		}
 
 		//TODO figure out what to do with this, this looks terrible
-		if (startC == 'n' && text->substr(current, 4) == "null")
+		if (text->substr(current, 4) == "null")
 		{
 			next(4);
 			return nullptr;
 		}
 
-		std::string parsedStr;
-		parseString(parsedStr);
-
-		return malloc->allocString(&parsedStr);
+		char buf[256];
+		sprintf_s(buf, 256, "Invalid value at line %u:%u", line, lineChar);
+		throw std::exception(buf);
 	}
 
 }
