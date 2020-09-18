@@ -1,4 +1,4 @@
-
+﻿
 #include <fstream>
 #include <iostream>
 
@@ -11,7 +11,7 @@ int main()
 	char rawData[4096]{'\0'};
 
 	std::ifstream file("example.json", std::ios::ate);
-
+	
 	if (!file.good())
 	{
 		throw std::runtime_error("Can't find example JSON!");

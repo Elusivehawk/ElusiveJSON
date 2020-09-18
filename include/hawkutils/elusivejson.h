@@ -348,6 +348,12 @@ namespace ElusiveJSON
 			return mem;
 		}
 
+		template<typename T>
+		T* allocate()
+		{
+			return (T*)allocate(sizeof(T), alignof(T));
+		}
+
 		void clear(bool secure = true)
 		{
 			if (secure)
@@ -364,18 +370,18 @@ namespace ElusiveJSON
 
 		}
 
-		JBool* allocBool(bool v) { return new(allocate(16, 16)) JBool(v); }
-		JInt* allocInt(int v) { return new(allocate(16, 16)) JInt(v); }
-		JFloat* allocFloat(float v) { return new(allocate(16, 16)) JFloat(v); }
-		JArray* allocArray(JValue** arr, size_t length) { return new(allocate(sizeof(JArray), 16)) JArray(arr, length); }
-		JObject* allocObject() { return new(allocate(sizeof(JObject), 16)) JObject(); }
+		JBool* allocBool(bool v) { return new(allocate<JBool>()) JBool(v); }
+		JInt* allocInt(int v) { return new(allocate<JInt>()) JInt(v); }
+		JFloat* allocFloat(float v) { return new(allocate<JFloat>()) JFloat(v); }
+		JArray* allocArray(JValue** arr, size_t length) { return new(allocate<JArray>()) JArray(arr, length); }
+		JObject* allocObject() { return new(allocate<JObject>()) JObject(); }
 
 		JString* allocString(std::string* str)
 		{
 			char* strMem = (char*)allocate(str->length());
 			std::memcpy(strMem, str->c_str(), str->length());
 
-			return new(allocate(sizeof(JString), 8)) JString(strMem, str->length());
+			return new(allocate<JString>()) JString(strMem, str->length());
 		}
 
 	};
