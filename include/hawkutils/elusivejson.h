@@ -1,7 +1,6 @@
 ﻿
 #pragma once
 
-#include <cstdio>
 #include <limits>
 #include <unordered_map>
 #include <sstream>
@@ -420,6 +419,8 @@ namespace ElusiveJSON
 			return this;
 		}
 
+		JValue* parseJValue();
+
 	private:
 		void next(uint32_t incr = 1)
 		{
@@ -508,6 +509,13 @@ namespace ElusiveJSON
 
 		JValue* parseJIntOrFloat()
 		{
+			char start = text->at(current);
+
+			if (!isInt(start) && start != '-' && !(useJSON5 && (start == '.' || start == '+')))
+			{
+				return nullptr;
+			}
+
 			std::stringstream ss;
 			bool isHex = false;
 			bool isFloat = false;
@@ -518,9 +526,13 @@ namespace ElusiveJSON
 			if (text->at(current) == '-')
 			{
 				next();
-				sign = -1;
+				ss << '-';
 			}
-
+			else if (useJSON5 && text->at(current) == '+')
+			{
+				next();
+			}
+			
 			if (useJSON5)
 			{
 				auto sub = text->substr(current, 3);
@@ -528,13 +540,13 @@ namespace ElusiveJSON
 				//TODO use proper ∞ sign
 				if (sub == "Inf")
 				{
-					next();
+					next(3);
 					return malloc->allocFloat(std::numeric_limits<float>::infinity() * sign);
 				}
 
 				if (sub == "NaN")
 				{
-					next();
+					next(3);
 					return malloc->allocFloat(NAN * sign);
 				}
 
@@ -690,8 +702,17 @@ namespace ElusiveJSON
 			return c;
 		}
 
-		void parseString(std::string& str, char delim)
+		bool parseString(std::string& str)
 		{
+			char delim = text->at(current);
+
+			if (delim != '\"' && (!useJSON5 || delim == '\''))
+			{
+				return false;
+			}
+
+			next();
+
 			std::stringstream ss;
 
 			char c;
@@ -721,10 +742,16 @@ namespace ElusiveJSON
 
 			str = ss.str();
 
+			return true;
 		}
 
-		void parseUnquotedKey(std::string& str)
+		bool parseUnquotedKey(std::string& str)
 		{
+			if (!useJSON5)
+			{
+				return false;
+			}
+
 			uint64_t start = current;
 			uint64_t count = 0;
 
@@ -736,38 +763,33 @@ namespace ElusiveJSON
 
 			if (count == 0)
 			{
-				char buf[256];
-				sprintf_s(buf, 256, "Invalid key value at line %u:%u: \'%c\'", line, lineChar, text->at(current));
-				throw std::exception(buf);
+				return false;
 			}
 
 			str = text->substr(start, count);
 
+			return true;
 		}
 
-		void parseKey(std::string& str)
+		bool parseKey(std::string& str)
 		{
-			char c = text->at(current);
-			
-			if (c == '\"' || (useJSON5 && c == '\''))
+			if (!parseString(str))
 			{
-				next();
-				parseString(str, c);
+				return parseUnquotedKey(str);
 			}
-			else if (useJSON5 && isASCIILetter(c))
-			{
-				parseUnquotedKey(str);
-			}
-			else
-			{
-				char buf[256];
-				sprintf_s(buf, 256, "Invalid key at line %u:%u (found \'%c\') ", line, lineChar, c);
-				throw std::exception(buf);
-			}
-		}
 
+			return true;
+		}
+	public:
 		JArray* parseJArray()
 		{
+			if (text->at(current) != '[')
+			{
+				return nullptr;
+			}
+
+			next();
+
 			std::vector<JValue*> vals;
 			bool expectNextObj = true;
 
@@ -787,7 +809,7 @@ namespace ElusiveJSON
 					next();
 					break;
 				}
-				
+
 				if (!expectNextObj)
 				{
 					char buf[256];
@@ -809,7 +831,7 @@ namespace ElusiveJSON
 					expectNextObj = false;
 
 				}
-				
+
 			}
 
 			JValue** array = (JValue**)malloc->allocate(vals.size() * sizeof(void*), sizeof(void*));
@@ -823,16 +845,11 @@ namespace ElusiveJSON
 			return malloc->allocArray(array, vals.size());
 		}
 
-	public:
-		JValue* parseJValue();
-
 		JObject* parseJObject()
 		{
 			if (text->at(current) != '{')
 			{
-				char buf[256];
-				sprintf_s(buf, 256, "Invalid JSON object at line %u:%u", line, lineChar);
-				throw std::exception(buf);
+				return nullptr;
 			}
 
 			next();
@@ -840,7 +857,7 @@ namespace ElusiveJSON
 			JObject* ret = malloc->allocObject();
 			bool expectNextPair = true;
 			bool trailingComma = false;
-			
+
 			while (true)
 			{
 				skipWhitespace();
@@ -857,7 +874,7 @@ namespace ElusiveJSON
 					next();
 					break;
 				}
-				
+
 				if (!expectNextPair)
 				{
 					char buf[256];
@@ -868,14 +885,19 @@ namespace ElusiveJSON
 				trailingComma = false;
 
 				std::string key;
-				parseKey(key);
+				if (!parseKey(key))
+				{
+					char buf[256];
+					sprintf_s(buf, 256, "Invalid key at line %u:%u: \'%c\'", line, lineChar, text->at(current));
+					throw std::exception(buf);
+				}
 
 				skipWhitespace();
 
 				if (text->at(current) != ':')
 				{
 					char buf[256];
-					sprintf_s(buf, 256, "Invalid value at %u:%u: \'%c\', was expecting \':\'", line, lineChar, text->at(current));
+					sprintf_s(buf, 256, "Invalid character at %u:%u: \'%c\', was expecting \':\'", line, lineChar, text->at(current));
 					throw std::exception(buf);
 				}
 
@@ -911,37 +933,32 @@ namespace ElusiveJSON
 
 	JValue* JParser::parseJValue()
 	{
-		char c = text->at(current);
+		JValue* ret;
 
-		if (c == '{')
+		if (ret = parseJObject())
 		{
-			return parseJObject();
+			return ret;
 		}
 
-		if (c == '[')
+		if (ret = parseJArray())
 		{
-			next();
-			return parseJArray();
+			return ret;
 		}
 
-		if (isDelim(c))
+		std::string parsedStr;
+		if (parseString(parsedStr))
 		{
-			next();
-			std::string parsedStr;
-			parseString(parsedStr, c);
-
 			return malloc->allocString(&parsedStr);
 		}
 
-		if (isInt(c) || c == '-' || (useJSON5 && (c == '.' || c == '+')))
+		if (ret = parseJIntOrFloat())
 		{
-			return parseJIntOrFloat();
+			return ret;
 		}
 
-		if (c == 't' || c == 'f')
+		if (ret = parseJBool())
 		{
-			JBool* bVal = parseJBool();
-			if (bVal) return bVal;
+			return ret;
 		}
 
 		//TODO figure out what to do with this, this looks terrible
